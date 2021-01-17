@@ -1,0 +1,15 @@
+USE [my_exchange];
+GO
+
+BEGIN TRANSACTION;
+
+WAITFOR (RECEIVE TOP (1)
+		conversation_handle AS [dialog_handle],
+		message_type_name   AS [message_type],
+		message_body        AS [message_body]
+		FROM [dajet-exchange-export-queue]
+	), TIMEOUT 1000;
+
+COMMIT TRANSACTION;
+
+--SELECT TOP(10) * FROM [dajet-exchange-export-queue] WITH(NOLOCK); --WITH(READCOMMITTEDLOCK, READPAST);
