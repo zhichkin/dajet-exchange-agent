@@ -12,4 +12,6 @@ WAITFOR (RECEIVE TOP (1)
 
 COMMIT TRANSACTION;
 
+--SELECT * FROM sys.dm_os_waiting_tasks where wait_type = 'BROKER_RECEIVE_WAITFOR';
+
 --SELECT TOP(10) * FROM [dajet-exchange-export-queue] WITH(NOLOCK); --WITH(READCOMMITTEDLOCK, READPAST);

@@ -18,19 +18,9 @@ namespace DaJet.RabbitMQ.Producer
         public MessageProducerSettings Settings { get; private set; }
         public void Configure(MessageProducerSettings settings)
         {
+            Dispose();
+
             Settings = settings;
-
-            if (Channel != null)
-            {
-                Channel.Close();
-                Channel.Dispose();
-            }
-
-            if (Connection != null)
-            {
-                Connection.Close();
-                Connection.Dispose();
-            }
 
             IConnectionFactory factory = new ConnectionFactory()
             {
