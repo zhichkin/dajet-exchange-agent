@@ -1,4 +1,5 @@
 ﻿using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Options;
 using System;
 using System.Data;
 using System.Text;
@@ -7,7 +8,6 @@ namespace DaJet.RabbitMQ.Producer
 {
     internal interface IMessageConsumer
     {
-        void Configure(MessageConsumerSettings settings);
         int ReceiveMessages(int count, out string errorMessage);
         int AwaitNotification(int timeout, out string errorMessage);
     }
@@ -15,13 +15,10 @@ namespace DaJet.RabbitMQ.Producer
     {
         private MessageConsumerSettings Settings { get; set; }
         private IMessageProducer MessageProducer { get; set; }
-        public MessageConsumer(IMessageProducer messageProducer)
+        public MessageConsumer(IMessageProducer messageProducer, IOptions<MessageConsumerSettings> options)
         {
+            Settings = options.Value;
             MessageProducer = messageProducer;
-        }
-        public void Configure(MessageConsumerSettings settings)
-        {
-            Settings = settings;
         }
         private string BuildConnectionString()
         {
@@ -66,8 +63,9 @@ namespace DaJet.RabbitMQ.Producer
                     reader = command.ExecuteReader();
                     while (reader.Read())
                     {
-                        DaJetMessage message = ProduceMessage(reader);
-                        MessageProducer.SendMessage(message.MessageBody);
+                        //DaJetMessage message = ProduceMessage(reader);
+                        //MessageProducer.SendMessage(message.MessageBody);
+                        MessageProducer.SendMessage(reader.GetString("ТелоСообщения"));
                     }
                     reader.Close();
                     messagesRecevied = reader.RecordsAffected;
@@ -79,7 +77,14 @@ namespace DaJet.RabbitMQ.Producer
                     errorMessage = ExceptionHelper.GetErrorText(error);
                     try
                     {
-                        transaction.Rollback();
+                        if (transaction != null)
+                        {
+                            if (reader != null && !reader.IsClosed)
+                            {
+                                reader.Close();
+                            }
+                            transaction.Rollback();
+                        }
                     }
                     catch (Exception rollbackError)
                     {
@@ -181,7 +186,10 @@ namespace DaJet.RabbitMQ.Producer
                     errorMessage = ExceptionHelper.GetErrorText(error);
                     try
                     {
-                        transaction.Rollback();
+                        if (transaction != null)
+                        {
+                            transaction.Rollback();
+                        }
                     }
                     catch (Exception rollbackError)
                     {

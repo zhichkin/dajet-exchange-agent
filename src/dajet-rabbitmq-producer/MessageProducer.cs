@@ -1,38 +1,24 @@
 ﻿using System;
+using System.Text;
+using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 
 namespace DaJet.RabbitMQ.Producer
 {
     public interface IMessageProducer : IDisposable
     {
-        MessageProducerSettings Settings { get; }
-        void Configure(MessageProducerSettings settings);
-        bool QueueExists();
-        void CreateQueue();
         void SendMessage(string messageBody);
     }
     public sealed class MessageProducer: IMessageProducer
     {
         private IModel Channel { get; set; }
         private IConnection Connection { get; set; }
-        public MessageProducerSettings Settings { get; private set; }
-        public void Configure(MessageProducerSettings settings)
+        private MessageProducerSettings Settings { get; set; }
+        public MessageProducer(IOptions<MessageProducerSettings> options)
         {
-            Dispose();
-
-            Settings = settings;
-
-            IConnectionFactory factory = new ConnectionFactory()
-            {
-                HostName = Settings.HostName,
-                UserName = Settings.UserName,
-                Password = Settings.Password,
-                Port = Settings.PortNumber
-            };
-            Connection = factory.CreateConnection();
-            Channel = Connection.CreateModel();
+            Settings = options.Value;
         }
-        public bool QueueExists()
+        private bool QueueExists()
         {
             bool exists = true;
             try
@@ -45,7 +31,7 @@ namespace DaJet.RabbitMQ.Producer
             }
             return exists;
         }
-        public void CreateQueue()
+        private void CreateQueue()
         {
             if (Channel.IsClosed)
             {
@@ -62,17 +48,32 @@ namespace DaJet.RabbitMQ.Producer
         }
         public void SendMessage(string messageBody)
         {
-            byte[] message = System.Text.Encoding.UTF8.GetBytes(messageBody);
+            if (Connection == null || Channel == null)
+            {
+                IConnectionFactory factory = new ConnectionFactory()
+                {
+                    HostName = Settings.HostName,
+                    UserName = Settings.UserName,
+                    Password = Settings.Password,
+                    Port = Settings.PortNumber
+                };
+                Connection = factory.CreateConnection();
+                Channel = Connection.CreateModel();
+            }
+            
+            if (Channel != null && Channel.IsClosed)
+            {
+                Channel.Dispose();
+                Channel = Connection.CreateModel();
+            }
 
             IBasicProperties properties = Channel.CreateBasicProperties();
             properties.ContentType = "application/json";
             properties.DeliveryMode = 2; // persistent
 
-            Channel.BasicPublish(
-                Settings.ExchangeName,
-                Settings.RoutingKey,
-                basicProperties: properties,
-                body: message);
+            byte[] message = Encoding.UTF8.GetBytes(messageBody);
+
+            Channel.BasicPublish(Settings.ExchangeName, Settings.RoutingKey, properties, message);
         }
         public void Dispose()
         {

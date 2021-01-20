@@ -1,5 +1,7 @@
-﻿using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,133 +10,107 @@ namespace DaJet.RabbitMQ.Producer
 {
     public sealed class Worker : BackgroundService
     {
-        private readonly ILogger<Worker> _logger;
+        private AppSettings Settings { get; set; }
+        private ILogger<Worker> Logger { get; set; }
+        private IServiceProvider Services { get; set; }
 
-        private MessageProducerSettings ProducerSettings { get; set; }
-        private IMessageProducer MessageProducer { get; set; }
-
-        private MessageConsumerSettings ConsumerSettings { get; set; }
-        private IMessageConsumer MessageConsumer { get; set; }
-
-        public Worker(ILogger<Worker> logger)
+        public Worker(IServiceProvider serviceProvider, IOptions<AppSettings> options, ILogger<Worker> logger)
         {
-            _logger = logger;
+            Logger = logger;
+            Settings = options.Value;
+            Services = serviceProvider;
         }
         public override Task StartAsync(CancellationToken cancellationToken)
         {
-            _logger.LogInformation("{time} Worker started.", DateTime.Now);
-
-            _logger.LogInformation("Initializing producer settings ...");
-            InitializeProducerSettings();
-
-            _logger.LogInformation("Initializing message producer ...");
-            InitializeMessageProducer();
-
-            _logger.LogInformation("Initializing consumer settings ...");
-            InitializeConsumerSettings();
-
-            _logger.LogInformation("Initializing message consumer ...");
-            InitializeMessageConsumer();
-
+            Logger.LogInformation("{time} Worker is started.", DateTime.Now);
             return base.StartAsync(cancellationToken);
         }
         public override Task StopAsync(CancellationToken cancellationToken)
         {
-            _logger.LogInformation("{time} Worker is stoped.", DateTime.Now);
+            Logger.LogInformation("{time} Worker is stoped.", DateTime.Now);
             return base.StopAsync(cancellationToken);
         }
         
-        private void InitializeProducerSettings()
-        {
-            ProducerSettings = new MessageProducerSettings();
-        }
-        private void InitializeMessageProducer()
-        {
-            MessageProducer = new MessageProducer();
-            MessageProducer.Configure(ProducerSettings);
-        }
-        private void InitializeConsumerSettings()
-        {
-            ConsumerSettings = new MessageConsumerSettings()
-            {
-                ServerName = "ZHICHKIN",
-                DatabaseName = "my_exchange"
-            };
-        }
-        private void InitializeMessageConsumer()
-        {
-            MessageConsumer = new MessageConsumer(MessageProducer);
-            MessageConsumer.Configure(ConsumerSettings);
-        }
-
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                try
+                ReceiveMessages(out string errorMessage);
+                if (!string.IsNullOrEmpty(errorMessage))
                 {
-                    _logger.LogInformation("{time} Start receiving messages.", DateTimeOffset.Now);
-                    int messagesReceived = ReceiveMessages(10);
-                    _logger.LogInformation("{time} {count} messages received.", DateTimeOffset.Now, messagesReceived);
-                    
-                    while (messagesReceived > 0)
-                    {
-                        _logger.LogInformation("{time} Start receiving messages.", DateTimeOffset.Now);
-                        messagesReceived = ReceiveMessages(10);
-                        _logger.LogInformation("{time} {count} messages received.", DateTimeOffset.Now, messagesReceived);
-                    }
-                }
-                catch (Exception error)
-                {
-                    _logger.LogInformation("{time} {error}", DateTime.Now, ExceptionHelper.GetErrorText(error));
-                    break;
+                    Logger.LogInformation("{time} {error}", FormatDateTime(DateTime.Now), errorMessage);
+                    Logger.LogInformation("{time} Critical error delay of {delay} seconds started.",
+                        FormatDateTime(DateTime.Now),
+                        Settings.CriticalErrorDelay / 1000);
+                    await Task.Delay(Settings.CriticalErrorDelay, stoppingToken);
                 }
 
-                try
+                int resultCode = AwaitNotification(Settings.WaitForNotificationTimeout);
+                if (resultCode == 1) // notifications are not supported by database
                 {
-                    _logger.LogInformation("{time} Start awaiting notification ...", DateTime.Now);
-                    int resultCode = AwaitNotification(300000); // 5 minutes
-                    if (resultCode == 0)
-                    {
-                        _logger.LogInformation("{time} Notification received successfully.", DateTime.Now);
-                    }
-                    else if (resultCode == 1)
-                    {
-                        // notifications are not supported by database
-                        await Task.Delay(60000, stoppingToken); // 1 minute
-                        _logger.LogInformation("{time} 1 minute waiting elapsed.", DateTimeOffset.Now);
-                    }
-                    else if (resultCode == 2)
-                    {
-                        _logger.LogInformation("{time} No notification received.", DateTime.Now);
-                    }
-                }
-                catch (Exception error)
-                {
-                    _logger.LogInformation("{time} {error}", DateTime.Now, ExceptionHelper.GetErrorText(error));
-                    break;
+                    await Task.Delay(Settings.ReceivingMessagesPeriodicity, stoppingToken);
                 }
             }
-            _logger.LogInformation("{time} Execution is interrupted.", DateTime.Now);
         }
-        private int ReceiveMessages(int messageCount)
+        private string FormatDateTime(DateTime input) { return input.ToString("yyyy-MM-dd HH:mm:ss"); }
+        private void ReceiveMessages(out string errorMessage)
         {
-            int messagesReceived = MessageConsumer.ReceiveMessages(messageCount, out string errorMessage);
-            
-            if (!string.IsNullOrEmpty(errorMessage))
+            int messagesReceived = 0;
+            errorMessage = string.Empty;
+
+            Logger.LogInformation("{time} Start receiving messages.", FormatDateTime(DateTime.Now));
+
+            try
             {
-                _logger.LogInformation("{time} {error}", DateTime.Now, errorMessage);
+                IMessageConsumer consumer = Services.GetService<IMessageConsumer>();
+                messagesReceived = consumer.ReceiveMessages(Settings.MessagesPerTransaction, out errorMessage);
+                while (messagesReceived > 0)
+                {
+                    messagesReceived += consumer.ReceiveMessages(Settings.MessagesPerTransaction, out errorMessage);
+                }
+            }
+            catch (Exception error)
+            {
+                errorMessage += (string.IsNullOrEmpty(errorMessage) ? string.Empty : Environment.NewLine)
+                    + ExceptionHelper.GetErrorText(error);
             }
 
-            return messagesReceived;
+            Logger.LogInformation("{time} {count} messages received.", FormatDateTime(DateTime.Now), messagesReceived);
         }
         private int AwaitNotification(int timeout)
         {
-            int resultCode = MessageConsumer.AwaitNotification(timeout, out string errorMessage);
+            int resultCode = 0;
+            string errorMessage = string.Empty;
+
+            Logger.LogInformation("{time} Start awaiting notification ...", FormatDateTime(DateTime.Now));
+
+            try
+            {
+                IMessageConsumer consumer = Services.GetService<IMessageConsumer>();
+                resultCode = consumer.AwaitNotification(timeout, out errorMessage);
+            }
+            catch (Exception error)
+            {
+                errorMessage += (string.IsNullOrEmpty(errorMessage) ? string.Empty : Environment.NewLine)
+                    + ExceptionHelper.GetErrorText(error);
+            }
 
             if (!string.IsNullOrEmpty(errorMessage))
             {
-                _logger.LogInformation("{time} {error}", DateTime.Now, errorMessage);
+                Logger.LogInformation("{time} {error}", FormatDateTime(DateTime.Now), errorMessage);
+            }
+
+            if (resultCode == 0)
+            {
+                Logger.LogInformation("{time} Notification received successfully.", FormatDateTime(DateTime.Now));
+            }
+            else if (resultCode == 1)
+            {
+                Logger.LogInformation("{time} Notifications are not supported.", FormatDateTime(DateTime.Now));
+            }
+            else if (resultCode == 2)
+            {
+                Logger.LogInformation("{time} No notification received.", FormatDateTime(DateTime.Now));
             }
 
             return resultCode;
