@@ -39,6 +39,7 @@ namespace DaJet.RabbitMQ.Producer
             config.Bind(settings);
 
             services.Configure<AppSettings>(config);
+            services.Configure<DaJetExchangeQueue>(config.GetSection("DaJetExchangeQueue"));
             services.Configure<MessageConsumerSettings>(config.GetSection("ConsumerSettings"));
             services.Configure<MessageProducerSettings>(config.GetSection("ProducerSettings"));
         }

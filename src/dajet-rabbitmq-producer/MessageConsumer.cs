@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Options;
 using System;
 using System.Data;
+using System.Linq;
 using System.Text;
 
 namespace DaJet.RabbitMQ.Producer
@@ -15,9 +16,13 @@ namespace DaJet.RabbitMQ.Producer
     {
         private MessageConsumerSettings Settings { get; set; }
         private IMessageProducer MessageProducer { get; set; }
-        public MessageConsumer(IMessageProducer messageProducer, IOptions<MessageConsumerSettings> options)
+        private DaJetExchangeQueue QueueInfo { get; set; }
+        public MessageConsumer(IMessageProducer messageProducer,
+            IOptions<DaJetExchangeQueue> queueOptions,
+            IOptions<MessageConsumerSettings> options)
         {
             Settings = options.Value;
+            QueueInfo = queueOptions.Value;
             MessageProducer = messageProducer;
         }
         private string BuildConnectionString()
@@ -39,6 +44,7 @@ namespace DaJet.RabbitMQ.Producer
             }
             return builder.ToString();
         }
+
 
         public int ReceiveMessages(int messageCount, out string errorMessage)
         {
@@ -126,14 +132,14 @@ namespace DaJet.RabbitMQ.Producer
             script.AppendLine("WITH [CTE] AS");
             script.AppendLine("(");
             script.AppendLine($"SELECT TOP({messageCount})");
-            script.AppendLine("[_Code]    AS [_Code],");
+            script.AppendLine("[_Code] AS [_Code],");
             script.AppendLine("[_Version] AS [_Version],");
-            script.AppendLine("[_Fld82]   AS [ДатаОперации],");
-            script.AppendLine("[_Fld83]   AS [ТипОперации],");
-            script.AppendLine("[_Fld84]   AS [ТипСообщения],");
-            script.AppendLine("[_Fld85]   AS [ТелоСообщения]");
+            script.AppendLine($"[{QueueInfo.Properties.Where(p => p.Name == "ДатаВремя").FirstOrDefault()?.Field}] AS [ДатаОперации],");
+            script.AppendLine($"[{QueueInfo.Properties.Where(p => p.Name == "ТипОперации").FirstOrDefault()?.Field}] AS [ТипОперации],");
+            script.AppendLine($"[{QueueInfo.Properties.Where(p => p.Name == "ТипСообщения").FirstOrDefault()?.Field}] AS [ТипСообщения],");
+            script.AppendLine($"[{QueueInfo.Properties.Where(p => p.Name == "ТелоСообщения").FirstOrDefault()?.Field}] AS [ТелоСообщения]");
             script.AppendLine("FROM");
-            script.AppendLine("[dbo].[_Reference81] WITH (ROWLOCK)");
+            script.AppendLine($"[dbo].[{QueueInfo.TableName}] WITH (ROWLOCK)");
             script.AppendLine("ORDER BY");
             script.AppendLine("[_Code] ASC, [_IDRRef] ASC");
             script.AppendLine(")");
