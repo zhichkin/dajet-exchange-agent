@@ -62,6 +62,31 @@
   - **RoutingKey** - ключ маршрутизации сообщения.
   - **ExchangeName** - имя точки обмена.
 
+- **DaJetExchangeQueue** - секция настройки SQL имён для справочника исходящих сообщений
+
+Имена таблицы и её полей можно получить при помощи обработки 1С DaJetExchange. Кнопка "Получить данные таблицы".
+
+**Пример секции DaJetExchangeQueue:**
+```json
+{
+  "DaJetExchangeQueue": {
+    "ObjectName": "Справочник.DaJetExchangeQueue",
+    "TableName": "_Reference81",
+    "Properties": [
+      { "Name": "Ссылка", "Field": "_IDRRef" },
+      { "Name": "ВерсияДанных", "Field": "_Version" },
+      { "Name": "ПометкаУдаления", "Field": "_Marked" },
+      { "Name": "ИмяПредопределенныхДанных", "Field": "_PredefinedID" },
+      { "Name": "Код", "Field": "_Code" },
+      { "Name": "ДатаВремя", "Field": "_Fld82" },
+      { "Name": "ТипОперации", "Field": "_Fld83" },
+      { "Name": "ТипСообщения", "Field": "_Fld84" },
+      { "Name": "ТелоСообщения", "Field": "_Fld85" }
+    ]
+  }
+}
+```
+
 **3. Запуск агента DaJet Exchange для SQL Server и RabbitMQ.**
 - Запустить исполняемый файл агента **dajet-rabbitmq-producer.exe**.
 
