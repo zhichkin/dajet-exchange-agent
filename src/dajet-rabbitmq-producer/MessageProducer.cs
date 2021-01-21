@@ -13,6 +13,7 @@ namespace DaJet.RabbitMQ.Producer
     {
         private IModel Channel { get; set; }
         private IConnection Connection { get; set; }
+        private IBasicProperties Properties { get; set; }
         private MessageProducerSettings Settings { get; set; }
         public MessageProducer(IOptions<MessageProducerSettings> options)
         {
@@ -46,47 +47,84 @@ namespace DaJet.RabbitMQ.Producer
             }
             Channel.QueueBind(Settings.QueueName, Settings.ExchangeName, Settings.RoutingKey, null);
         }
-        public void SendMessage(string messageBody)
+
+
+        private IConnection CreateConnection()
         {
-            if (Connection == null || Channel == null)
+            IConnectionFactory factory = new ConnectionFactory()
             {
-                IConnectionFactory factory = new ConnectionFactory()
-                {
-                    HostName = Settings.HostName,
-                    UserName = Settings.UserName,
-                    Password = Settings.Password,
-                    Port = Settings.PortNumber
-                };
-                Connection = factory.CreateConnection();
-                Channel = Connection.CreateModel();
+                HostName = Settings.HostName,
+                UserName = Settings.UserName,
+                Password = Settings.Password,
+                Port = Settings.PortNumber
+            };
+            return factory.CreateConnection();
+        }
+        private void InitializeConnection()
+        {
+            if (Connection == null)
+            {
+                Connection = CreateConnection();
             }
-            
-            if (Channel != null && Channel.IsClosed)
+            else if (!Connection.IsOpen)
+            {
+                Connection.Dispose();
+                Connection = CreateConnection();
+            }
+        }
+        private void InitializeBasicProperties()
+        {
+            if (Channel == null) return;
+            if (Channel.IsClosed) return;
+
+            Properties = Channel.CreateBasicProperties();
+            Properties.ContentType = "application/json";
+            Properties.DeliveryMode = 2; // persistent
+        }
+        private void InitializeChannel()
+        {
+            InitializeConnection();
+
+            if (Channel == null)
+            {
+                Channel = Connection.CreateModel();
+                InitializeBasicProperties();
+            }
+            else if (Channel.IsClosed)
             {
                 Channel.Dispose();
                 Channel = Connection.CreateModel();
+                InitializeBasicProperties();
             }
+        }
+        
 
-            IBasicProperties properties = Channel.CreateBasicProperties();
-            properties.ContentType = "application/json";
-            properties.DeliveryMode = 2; // persistent
+        public void SendMessage(string messageBody)
+        {
+            InitializeChannel();
 
             byte[] message = Encoding.UTF8.GetBytes(messageBody);
 
-            Channel.BasicPublish(Settings.ExchangeName, Settings.RoutingKey, properties, message);
+            Channel.BasicPublish(Settings.ExchangeName, Settings.RoutingKey, Properties, message);
         }
         public void Dispose()
         {
             if (Channel != null)
             {
-                Channel.Close();
+                if (!Channel.IsClosed)
+                {
+                    Channel.Close();
+                }
                 Channel.Dispose();
                 Channel = null;
             }
 
             if (Connection != null)
             {
-                Connection.Close();
+                if (Connection.IsOpen)
+                {
+                    Connection.Close();
+                }
                 Connection.Dispose();
                 Connection = null;
             }

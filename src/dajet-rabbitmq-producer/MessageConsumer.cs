@@ -45,6 +45,38 @@ namespace DaJet.RabbitMQ.Producer
             return builder.ToString();
         }
 
+        private void RollbackTransaction(SqlTransaction transaction, SqlDataReader reader, out string errorMessage)
+        {
+            errorMessage = string.Empty;
+
+            if (transaction == null) return;
+
+            try
+            {
+                if (reader != null && !reader.IsClosed)
+                {
+                    reader.Close();
+                }
+                transaction.Rollback();
+            }
+            catch (Exception error)
+            {
+                errorMessage = ExceptionHelper.GetErrorText(error);
+            }
+        }
+        private void DisposeDatabaseResources(SqlConnection connection, SqlDataReader reader, SqlCommand command)
+        {
+            if (reader != null)
+            {
+                if (!reader.IsClosed && reader.HasRows)
+                {
+                    command.Cancel();
+                }
+                reader.Dispose();
+            }
+            if (command != null) command.Dispose();
+            if (connection != null) connection.Dispose();
+        }
 
         public int ReceiveMessages(int messageCount, out string errorMessage)
         {
@@ -81,34 +113,17 @@ namespace DaJet.RabbitMQ.Producer
                 catch (Exception error)
                 {
                     errorMessage = ExceptionHelper.GetErrorText(error);
-                    try
+
+                    RollbackTransaction(transaction, reader, out string rollbackError);
+                    
+                    if (!string.IsNullOrEmpty(rollbackError))
                     {
-                        if (transaction != null)
-                        {
-                            if (reader != null && !reader.IsClosed)
-                            {
-                                reader.Close();
-                            }
-                            transaction.Rollback();
-                        }
-                    }
-                    catch (Exception rollbackError)
-                    {
-                        errorMessage += Environment.NewLine + rollbackError.Message;
+                        errorMessage += Environment.NewLine + rollbackError;
                     }
                 }
                 finally
                 {
-                    if (reader != null)
-                    {
-                        if (!reader.IsClosed && reader.HasRows)
-                        {
-                            command.Cancel();
-                        }
-                        reader.Dispose();
-                    }
-                    if (command != null) command.Dispose();
-                    if (connection != null) connection.Dispose();
+                    DisposeDatabaseResources(connection, reader, command);
                 }
             }
             return messagesRecevied;
@@ -161,7 +176,7 @@ namespace DaJet.RabbitMQ.Producer
                 SqlCommand command = connection.CreateCommand();
                 command.CommandType = CommandType.Text;
                 command.CommandText = AwaitNotificationScript(timeout);
-                command.CommandTimeout = timeout / 1000 + 1;
+                command.CommandTimeout = timeout / 1000 + 10;
 
                 try
                 {
@@ -189,31 +204,19 @@ namespace DaJet.RabbitMQ.Producer
                 catch (Exception error)
                 {
                     resultCode = 1; // notifications are not supported by database
+                    
                     errorMessage = ExceptionHelper.GetErrorText(error);
-                    try
+                    
+                    RollbackTransaction(transaction, reader, out string rollbackError);
+
+                    if (!string.IsNullOrEmpty(rollbackError))
                     {
-                        if (transaction != null)
-                        {
-                            transaction.Rollback();
-                        }
-                    }
-                    catch (Exception rollbackError)
-                    {
-                        errorMessage += Environment.NewLine + rollbackError.Message;
+                        errorMessage += Environment.NewLine + rollbackError;
                     }
                 }
                 finally
                 {
-                    if (reader != null)
-                    {
-                        if (!reader.IsClosed && reader.HasRows)
-                        {
-                            command.Cancel();
-                        }
-                        reader.Dispose();
-                    }
-                    if (command != null) command.Dispose();
-                    if (connection != null) connection.Dispose();
+                    DisposeDatabaseResources(connection, reader, command);
                 }
             }
             return resultCode;

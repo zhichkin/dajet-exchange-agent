@@ -1,6 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System;
 using System.Threading;
@@ -11,23 +10,21 @@ namespace DaJet.RabbitMQ.Producer
     public sealed class Worker : BackgroundService
     {
         private AppSettings Settings { get; set; }
-        private ILogger<Worker> Logger { get; set; }
         private IServiceProvider Services { get; set; }
 
-        public Worker(IServiceProvider serviceProvider, IOptions<AppSettings> options, ILogger<Worker> logger)
+        public Worker(IServiceProvider serviceProvider, IOptions<AppSettings> options)
         {
-            Logger = logger;
             Settings = options.Value;
             Services = serviceProvider;
         }
         public override Task StartAsync(CancellationToken cancellationToken)
         {
-            Logger.LogInformation("{time} Worker is started.", DateTime.Now);
+            FileLogger.Log("Worker is started.");
             return base.StartAsync(cancellationToken);
         }
         public override Task StopAsync(CancellationToken cancellationToken)
         {
-            Logger.LogInformation("{time} Worker is stoped.", DateTime.Now);
+            FileLogger.Log("Worker is stoped.");
             return base.StopAsync(cancellationToken);
         }
         
@@ -38,10 +35,8 @@ namespace DaJet.RabbitMQ.Producer
                 ReceiveMessages(out string errorMessage);
                 if (!string.IsNullOrEmpty(errorMessage))
                 {
-                    Logger.LogInformation("{time} {error}", FormatDateTime(DateTime.Now), errorMessage);
-                    Logger.LogInformation("{time} Critical error delay of {delay} seconds started.",
-                        FormatDateTime(DateTime.Now),
-                        Settings.CriticalErrorDelay / 1000);
+                    FileLogger.Log(errorMessage);
+                    FileLogger.Log(string.Format("Critical error delay of {0} seconds started.", Settings.CriticalErrorDelay / 1000));
                     await Task.Delay(Settings.CriticalErrorDelay, stoppingToken);
                 }
 
@@ -52,21 +47,23 @@ namespace DaJet.RabbitMQ.Producer
                 }
             }
         }
-        private string FormatDateTime(DateTime input) { return input.ToString("yyyy-MM-dd HH:mm:ss"); }
         private void ReceiveMessages(out string errorMessage)
         {
+            int sumReceived = 0;
             int messagesReceived = 0;
             errorMessage = string.Empty;
 
-            Logger.LogInformation("{time} Start receiving messages.", FormatDateTime(DateTime.Now));
+            FileLogger.Log("Start receiving messages.");
 
             try
             {
                 IMessageConsumer consumer = Services.GetService<IMessageConsumer>();
                 messagesReceived = consumer.ReceiveMessages(Settings.MessagesPerTransaction, out errorMessage);
+                sumReceived += messagesReceived;
                 while (messagesReceived > 0)
                 {
-                    messagesReceived += consumer.ReceiveMessages(Settings.MessagesPerTransaction, out errorMessage);
+                    messagesReceived = consumer.ReceiveMessages(Settings.MessagesPerTransaction, out errorMessage);
+                    sumReceived += messagesReceived;
                 }
             }
             catch (Exception error)
@@ -75,14 +72,14 @@ namespace DaJet.RabbitMQ.Producer
                     + ExceptionHelper.GetErrorText(error);
             }
 
-            Logger.LogInformation("{time} {count} messages received.", FormatDateTime(DateTime.Now), messagesReceived);
+            FileLogger.Log(string.Format("{0} messages received.", sumReceived));
         }
         private int AwaitNotification(int timeout)
         {
             int resultCode = 0;
             string errorMessage = string.Empty;
 
-            Logger.LogInformation("{time} Start awaiting notification ...", FormatDateTime(DateTime.Now));
+            FileLogger.Log("Start awaiting notification ...");
 
             try
             {
@@ -97,20 +94,20 @@ namespace DaJet.RabbitMQ.Producer
 
             if (!string.IsNullOrEmpty(errorMessage))
             {
-                Logger.LogInformation("{time} {error}", FormatDateTime(DateTime.Now), errorMessage);
+                FileLogger.Log(errorMessage);
             }
 
             if (resultCode == 0)
             {
-                Logger.LogInformation("{time} Notification received successfully.", FormatDateTime(DateTime.Now));
+                FileLogger.Log("Notification received successfully.");
             }
             else if (resultCode == 1)
             {
-                Logger.LogInformation("{time} Notifications are not supported.", FormatDateTime(DateTime.Now));
+                FileLogger.Log("Notifications are not supported.");
             }
             else if (resultCode == 2)
             {
-                Logger.LogInformation("{time} No notification received.", FormatDateTime(DateTime.Now));
+                FileLogger.Log("No notification received.");
             }
 
             return resultCode;
