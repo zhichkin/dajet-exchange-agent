@@ -129,3 +129,6 @@ sc create "DaJet Exchange Agent" binPath="D:\dajet-agent\dajet-rabbitmq-producer
 	
 КонецФункции
 ```
+
+**5. Дистрибутив для win-x64, версия 1.0**
+[Ссылка на zip файл.](https://infostart.ru/public/download.php?file=1366915&pub=1323827)
