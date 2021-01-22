@@ -15,8 +15,7 @@ namespace DaJet.RabbitMQ.Producer
         public static IHostBuilder CreateHostBuilder(string[] args)
         {
             return Host.CreateDefaultBuilder(args)
-                // .UseWindowsService() from Microsoft.Extensions.Hosting.WindowsServices package
-                // https://csharp.christiannagel.com/2019/10/15/windowsservice/
+                .UseWindowsService()
                 .ConfigureServices((context, services) =>
                 {
                     services.AddOptions();
