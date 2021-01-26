@@ -58,6 +58,7 @@ sc create "DaJet Exchange Agent" binPath="D:\dajet-agent\dajet-rabbitmq-producer
 
 **2. Описание файла appsettings.json.**
 
+- **LogSize** - размер файла лога, по умолчанию равен 64 Kb, по достижению этого размера пересоздаётся
 - **CriticalErrorDelay** - интервал ожидания доступности SQL Server или RabbitMQ в миллисекундах.
 - **MessagesPerTransaction** - количество сообщений, обрабатываемых за одну транзакцию СУБД.
 - **ReceivingMessagesPeriodicity** - интервал ожидания новых сообщений в узле обмена в миллисекундах.
