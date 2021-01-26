@@ -37,6 +37,8 @@ namespace DaJet.RabbitMQ.Producer
                 .Build();
             config.Bind(settings);
 
+            FileLogger.LogSize = settings.LogSize;
+
             services.Configure<AppSettings>(config);
             services.Configure<DaJetExchangeQueue>(config.GetSection("DaJetExchangeQueue"));
             services.Configure<MessageConsumerSettings>(config.GetSection("ConsumerSettings"));

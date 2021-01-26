@@ -21,8 +21,24 @@ namespace DaJet.RabbitMQ.Producer
 
             return _filePath;
         }
+        public static int LogSize { get; set; }
         public static void Log(string text)
         {
+            string filePath = GetFilePath();
+            FileInfo file = new FileInfo(filePath);
+
+            try
+            {
+                if (file.Exists && file.Length > LogSize)
+                {
+                    file.Delete();
+                }
+            }
+            catch (Exception ex)
+            {
+                text += Environment.NewLine + ExceptionHelper.GetErrorText(ex);
+            }
+
             using (StreamWriter writer = new StreamWriter(GetFilePath(), true, Encoding.UTF8))
             {
                 writer.WriteLine("[{0}] {1}", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), text);
