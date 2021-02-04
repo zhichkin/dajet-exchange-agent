@@ -2,15 +2,21 @@
 using System.Text;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 
 namespace DaJet.RabbitMQ.Producer
 {
     public interface IMessageProducer : IDisposable
     {
+        void CreateQueue();
         void SendMessage(string messageBody);
+        void SendMessage(string messageType, string messageBody);
     }
     public sealed class MessageProducer: IMessageProducer
     {
+        private const string DEFAULT_EXCHANGE_NAME = "exchange";
+        private const string PUBLISHER_CONFIRMATION_ERROR_MESSAGE = "The sending of the message has not been confirmed. Check the availability of the message broker.";
+
         private IModel Channel { get; set; }
         private IConnection Connection { get; set; }
         private IBasicProperties Properties { get; set; }
@@ -32,13 +38,10 @@ namespace DaJet.RabbitMQ.Producer
             }
             return exists;
         }
-        private void CreateQueue()
+        public void CreateQueue()
         {
-            if (Channel.IsClosed)
-            {
-                Channel.Dispose();
-                Channel = Connection.CreateModel();
-            }
+            InitializeChannel();
+
             Channel.ExchangeDeclare(Settings.ExchangeName, ExchangeType.Direct, true, false, null);
             QueueDeclareOk queue = Channel.QueueDeclare(Settings.QueueName, true, false, false, null);
             if (queue == null)
@@ -47,7 +50,6 @@ namespace DaJet.RabbitMQ.Producer
             }
             Channel.QueueBind(Settings.QueueName, Settings.ExchangeName, Settings.RoutingKey, null);
         }
-
 
         private IConnection CreateConnection()
         {
@@ -88,25 +90,52 @@ namespace DaJet.RabbitMQ.Producer
             if (Channel == null)
             {
                 Channel = Connection.CreateModel();
+                Channel.ConfirmSelect();
                 InitializeBasicProperties();
             }
             else if (Channel.IsClosed)
             {
                 Channel.Dispose();
                 Channel = Connection.CreateModel();
+                Channel.ConfirmSelect();
                 InitializeBasicProperties();
             }
         }
-        
+
+        private string CreateExchangeName(string routingKey)
+        {
+            if (string.IsNullOrWhiteSpace(routingKey))
+            {
+                return Settings.ExchangeName;
+            }
+            return Settings.ExchangeName.Replace(DEFAULT_EXCHANGE_NAME, routingKey);
+        }
 
         public void SendMessage(string messageBody)
         {
+            SendMessage(string.Empty, messageBody);
+        }
+        public void SendMessage(string messageType, string messageBody)
+        {
             InitializeChannel();
 
+            _ = Settings.MessageTypeRouting.TryGetValue(messageType, out string routingKey);
+
+            string exchangeName = CreateExchangeName(routingKey);
             byte[] message = Encoding.UTF8.GetBytes(messageBody);
 
-            Channel.BasicPublish(Settings.ExchangeName, Settings.RoutingKey, Properties, message);
+            //Channel.ConfirmSelect();
+            Channel.BasicPublish(exchangeName, Settings.RoutingKey, Properties, message);
+            bool confirmed = Channel.WaitForConfirms(TimeSpan.FromSeconds(Settings.ConfirmationTimeout));
+            //if (Channel.NextPublishSeqNo == 2) { }
+            if (!confirmed)
+            {
+                throw new OperationCanceledException(PUBLISHER_CONFIRMATION_ERROR_MESSAGE);
+            }
         }
+
+        
+
         public void Dispose()
         {
             if (Channel != null)

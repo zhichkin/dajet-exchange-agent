@@ -103,7 +103,9 @@ namespace DaJet.RabbitMQ.Producer
                     {
                         //DaJetMessage message = ProduceMessage(reader);
                         //MessageProducer.SendMessage(message.MessageBody);
-                        MessageProducer.SendMessage(reader.GetString("ТелоСообщения"));
+                        MessageProducer.SendMessage(
+                            reader.GetString("ТипСообщения"),
+                            reader.GetString("ТелоСообщения"));
                     }
                     reader.Close();
                     messagesRecevied = reader.RecordsAffected;
