@@ -75,9 +75,47 @@ sc create "DaJet Exchange Agent" binPath="D:\dajet-agent\dajet-rabbitmq-producer
   - **PortNumber** - порт сервера.
   - **UserName** - имя пользователя для подключения к серверу.
   - **Password** - пароль пользователя для подключения к серверу.
-  - **QueueName** - имя очереди сообщений.
+  - **QueueName** - имя очереди сообщений по умолчанию.
   - **RoutingKey** - ключ маршрутизации сообщения.
-  - **ExchangeName** - имя точки обмена.
+  - **ExchangeName** - имя точки обмена по умолчанию, переопределяется настройкой **MessageTypeRouting**.
+  - **ConfirmationTimeout** - таймаут ожидания подтверждения сервером RabbitMQ получения сообщения отправителю (publisher confirm).
+  - **MessageTypeRouting** - сопоставление типов сообщений и очередей назначения.
+
+Если использовать настройки **ExchangeName** и **MessageTypeRouting** из примера ниже, то необходимо в RabbitMQ создать точки обмена и соответствующие им очереди со следующими именами:
+- dajet.goods (Справочник.Номенклатура)
+- dajet.orders (Документ.ЗаказКлиента)
+- dajet.prices (РегистрСведений.ЦеныНоменклатуры)
+- dajet.stocks (РегистрНакопления.ОстаткиТоваров)
+
+Другими словами, настройка сопоставления выполняет замену в имени точки обмена слова "exchange" на указанное слово в настройках для данного типа сообщения. Таким образом наименование точки обмена в настройке **ExchangeName** должно обязательно содержать это заменяемое слово и может иметь следующие варианты:
+- dajet.exchange
+- exchange.dajet
+- consumer.producer.exchange
+- и так далее
+
+Если сопоставление типа сообщения имени точки обмена не выполнено, то такое сообщение будет отправляться в точку обмена по умолчанию, которое указано в настройке **ExchangeName**.
+
+**Пример секции ProducerSettings:**
+```json
+{
+  "ProducerSettings": {
+    "HostName": "localhost",
+    "PortNumber": 5672,
+    "UserName": "guest",
+    "Password": "guest",
+    "QueueName": "dajet.queue",
+    "RoutingKey": "",
+    "ExchangeName": "dajet.exchange",
+    "ConfirmationTimeout": 1,
+    "MessageTypeRouting": {
+      "Справочник.Номенклатура": "goods",
+      "Документ.ЗаказКлиента": "orders",
+      "РегистрСведений.ЦеныНоменклатуры": "prices",
+      "РегистрНакопления.ОстаткиТоваров": "stocks"
+    }
+  }
+}
+```
 
 - **DaJetExchangeQueue** - секция настройки SQL имён для справочника исходящих сообщений
 
