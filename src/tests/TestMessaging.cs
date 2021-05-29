@@ -1,6 +1,8 @@
 using DaJet.RabbitMQ.Producer;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
+using System.Collections.Generic;
 
 namespace tests
 {
@@ -18,6 +20,7 @@ namespace tests
             MessageProducerSettings settings = new MessageProducerSettings()
             {
                 HostName = "localhost",
+                VirtualHost = "",
                 UserName = "guest",
                 Password = "guest",
                 PortNumber = 5672,
@@ -27,13 +30,47 @@ namespace tests
             };
             Settings = Options.Create(settings);
         }
-        
+
         [TestMethod]
         public void TestCreateQueue()
         {
-            IMessageProducer producer = new MessageProducer(Settings);
-            producer.CreateQueue();
-            producer.Dispose();
+            List<string> queues = new List<string>()
+            {
+                "accord.dajet.goods",
+                "accord.dajet.prices",
+                "accord.dajet.regions",
+                "accord.dajet.counterparties"
+            };
+
+            using (IMessageProducer producer = new MessageProducer(Settings))
+            {
+                foreach (string queueName in queues)
+                {
+                    Settings.Value.QueueName = queueName;
+                    Settings.Value.ExchangeName = queueName;
+
+                    if (producer.QueueExists())
+                    {
+                        Console.WriteLine("Queue " + queueName + " exists.");
+                    }
+                    else
+                    {
+                        Console.WriteLine("Queue " + queueName + " is not found.");
+                        producer.CreateQueue();
+                        Console.WriteLine("Queue " + queueName + " created successfully.");
+
+                        if (producer.QueueExists())
+                        {
+                            Console.WriteLine("Queue " + queueName + " exists.");
+                        }
+                        else
+                        {
+                            Console.WriteLine("Queue " + queueName + " does not exist.");
+                        }
+                    }
+                }
+                
+            }
         }
     }
 }

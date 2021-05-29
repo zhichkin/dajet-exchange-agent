@@ -8,6 +8,7 @@ namespace DaJet.RabbitMQ.Producer
 {
     public interface IMessageProducer : IDisposable
     {
+        bool QueueExists();
         void CreateQueue();
         void SendMessage(string messageBody);
         void SendMessage(string messageType, string messageBody);
@@ -25,15 +26,21 @@ namespace DaJet.RabbitMQ.Producer
         {
             Settings = options.Value;
         }
-        private bool QueueExists()
+        public bool QueueExists()
         {
+            InitializeChannel();
+
             bool exists = true;
             try
             {
                 QueueDeclareOk queue = Channel.QueueDeclarePassive(Settings.QueueName);
             }
-            catch
+            catch (Exception error)
             {
+                if (!error.Message.Contains("NOT_FOUND"))
+                {
+                    throw error;
+                }
                 exists = false;
             }
             return exists;
@@ -56,6 +63,7 @@ namespace DaJet.RabbitMQ.Producer
             IConnectionFactory factory = new ConnectionFactory()
             {
                 HostName = Settings.HostName,
+                VirtualHost = Settings.VirtualHost,
                 UserName = Settings.UserName,
                 Password = Settings.Password,
                 Port = Settings.PortNumber
