@@ -420,7 +420,7 @@ namespace DaJet.RabbitMQ.Producer
         {
             try
             {
-                bool confirmed = channel.Channel.WaitForConfirms(TimeSpan.FromSeconds(10), out bool timedout);
+                bool confirmed = channel.Channel.WaitForConfirms(TimeSpan.FromSeconds(Settings.ConfirmationTimeout), out bool timedout);
                 if (!confirmed)
                 {
                     if (timedout)

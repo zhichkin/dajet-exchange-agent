@@ -1,5 +1,7 @@
 # DaJet Exchange Agent
 
+[Требуется установка .NET Core 3.1](https://dotnet.microsoft.com/download)
+
 Агент DaJet Exchange устанавливается в узле обмена данными
 для переноса сообщений из справочника 1С "DaJetExchangeQueue"
 в интеграционную систему для обработки и маршрутизации сообщений.
@@ -59,10 +61,11 @@ sc create "DaJet Exchange Agent" binPath="D:\dajet-agent\dajet-rabbitmq-producer
 **2. Описание файла appsettings.json.**
 
 - **LogSize** - размер файла лога, по умолчанию равен 64 Kb, по достижению этого размера пересоздаётся
-- **CriticalErrorDelay** - интервал ожидания доступности SQL Server или RabbitMQ в миллисекундах.
+- **CriticalErrorDelay** - интервал ожидания доступности SQL Server или RabbitMQ в секундах.
 - **MessagesPerTransaction** - количество сообщений, обрабатываемых за одну транзакцию СУБД.
-- **ReceivingMessagesPeriodicity** - интервал ожидания новых сообщений в узле обмена в миллисекундах.
-- **WaitForNotificationTimeout** - таймаут ожидания уведомления о новых сообщениях в узле обмена в миллисекундах.
+- **ReceivingMessagesPeriodicity** - интервал ожидания новых сообщений в узле обмена в секундах.
+- **UseNotifications** - использование уведомлений SQL Server Service Broker (по умолчанию = false).
+- **WaitForNotificationTimeout** - таймаут ожидания уведомления о новых сообщениях в узле обмена в секундах.
 
 - **ConsumerSettings** - секция настройки подключения к SQL Server.
   - **ServerName** - сетевое имя сервера.
@@ -72,14 +75,15 @@ sc create "DaJet Exchange Agent" binPath="D:\dajet-agent\dajet-rabbitmq-producer
 
 - **ProducerSettings** - секция настройки подключения к RabbitMQ.
   - **HostName** - сетевой адрес сервера.
+  - **VirtualHost** - имя вируального сервера (по умолчанию "/").
   - **PortNumber** - порт сервера.
   - **UserName** - имя пользователя для подключения к серверу.
   - **Password** - пароль пользователя для подключения к серверу.
   - **QueueName** - имя очереди сообщений по умолчанию.
-  - **RoutingKey** - ключ маршрутизации сообщения.
-  - **ExchangeName** - имя точки обмена по умолчанию, переопределяется настройкой **MessageTypeRouting**.
-  - **ConfirmationTimeout** - таймаут ожидания подтверждения сервером RabbitMQ получения сообщения отправителю (publisher confirm).
-  - **MessageTypeRouting** - сопоставление типов сообщений и очередей назначения.
+  - **RoutingKey** - ключ маршрутизации сообщения (queue binding key).
+  - **ExchangeName** - имя точки обмена типа "topic", дополняется настройкой **MessageTypeRouting**.
+  - **ConfirmationTimeout** - таймаут ожидания подтверждения сервером RabbitMQ получения сообщения (publisher confirm).
+  - **MessageTypeRouting** - сопоставление типов сообщений 1С и очередей RabbitMQ для точек обмена типа "direct".
 
 Если использовать настройки **ExchangeName** и **MessageTypeRouting** из примера ниже, то необходимо в RabbitMQ создать точки обмена и соответствующие им очереди со следующими именами:
 - dajet.goods (Справочник.Номенклатура)
@@ -100,13 +104,14 @@ sc create "DaJet Exchange Agent" binPath="D:\dajet-agent\dajet-rabbitmq-producer
 {
   "ProducerSettings": {
     "HostName": "localhost",
+    "VirtualHost": "/",
     "PortNumber": 5672,
     "UserName": "guest",
     "Password": "guest",
     "QueueName": "dajet.queue",
     "RoutingKey": "",
     "ExchangeName": "dajet.exchange",
-    "ConfirmationTimeout": 1,
+    "ConfirmationTimeout": 10,
     "MessageTypeRouting": {
       "Справочник.Номенклатура": "goods",
       "Документ.ЗаказКлиента": "orders",
@@ -125,18 +130,15 @@ sc create "DaJet Exchange Agent" binPath="D:\dajet-agent\dajet-rabbitmq-producer
 ```json
 {
   "DaJetExchangeQueue": {
-    "ObjectName": "Справочник.DaJetExchangeQueue",
-    "TableName": "_Reference81",
+    "ObjectName": "РегистрСведений.DaJetExchangeQueue",
+    "TableName": "_InfoRg200",
     "Properties": [
-      { "Name": "Ссылка", "Field": "_IDRRef" },
-      { "Name": "ВерсияДанных", "Field": "_Version" },
-      { "Name": "ПометкаУдаления", "Field": "_Marked" },
-      { "Name": "ИмяПредопределенныхДанных", "Field": "_PredefinedID" },
-      { "Name": "Код", "Field": "_Code" },
-      { "Name": "ДатаВремя", "Field": "_Fld82" },
-      { "Name": "ТипОперации", "Field": "_Fld83" },
-      { "Name": "ТипСообщения", "Field": "_Fld84" },
-      { "Name": "ТелоСообщения", "Field": "_Fld85" }
+      { "Name": "МоментВремени", "Field": "_Fld201" },
+      { "Name": "Идентификатор", "Field": "_Fld202" },
+      { "Name": "ТипСообщения",  "Field": "_Fld203" },
+      { "Name": "ТелоСообщения", "Field": "_Fld204" },
+      { "Name": "ДатаВремя",     "Field": "_Fld205" },
+      { "Name": "ТипОперации",   "Field": "_Fld206" }
     ]
   }
 }
@@ -155,8 +157,10 @@ sc create "DaJet Exchange Agent" binPath="D:\dajet-agent\dajet-rabbitmq-producer
 ```C#
 Функция ПолучитьНазваниеТаблицыСУБД()
 	
+	СтруктураДанных = Новый Структура();
+	
 	Отбор = Новый Массив();
-	Отбор.Добавить(Метаданные.Справочники.DaJetExchangeQueue);
+	Отбор.Добавить(Метаданные.РегистрыСведений.DaJetExchangeQueue);
 	ОписаниеДанных = ПолучитьСтруктуруХраненияБазыДанных(Отбор, Истина);
 	
 	ОписаниеТаблицы = ОписаниеДанных.Найти("Основная", "Назначение");
@@ -164,11 +168,22 @@ sc create "DaJet Exchange Agent" binPath="D:\dajet-agent\dajet-rabbitmq-producer
 		Возврат "Описание основной таблицы не найдено.";
 	КонецЕсли;
 	
-	Возврат ОписаниеТаблицы.ИмяТаблицыХранения;
+	СтруктураДанных.Вставить("ObjectName", ОписаниеТаблицы.Метаданные);
+	СтруктураДанных.Вставить("TableName", ОписаниеТаблицы.ИмяТаблицыХранения);
+	СтруктураДанных.Вставить("Properties", Новый Массив());
+	
+	Для Каждого Поле Из ОписаниеТаблицы.Поля Цикл
+		СтруктураПоля = Новый Структура();
+		СтруктураПоля.Вставить("Name", Поле.ИмяПоля);
+		СтруктураПоля.Вставить("Field", Поле.ИмяПоляХранения);
+		СтруктураДанных.Properties.Добавить(СтруктураПоля);
+	КонецЦикла;
+	
+	ЗаписьJSON = Новый ЗаписьJSON();
+	ЗаписьJSON.УстановитьСтроку();
+	ЗаписатьJSON(ЗаписьJSON, СтруктураДанных);
+	
+	Возврат ЗаписьJSON.Закрыть();
 	
 КонецФункции
 ```
-
-**5. Дистрибутив для win-x64, версия 1.0**
-
-[Ссылка на страницу с архивом (внизу статьи есть кнопка для скачивания).](https://infostart.ru/public/1323827/)

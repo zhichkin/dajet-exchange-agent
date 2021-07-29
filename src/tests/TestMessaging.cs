@@ -24,7 +24,7 @@ namespace tests
             MessageProducerSettings settings = new MessageProducerSettings()
             {
                 HostName = "localhost",
-                VirtualHost = "",
+                VirtualHost = "/",
                 UserName = "guest",
                 Password = "guest",
                 PortNumber = 5672,
@@ -81,7 +81,7 @@ namespace tests
             MessageProducerSettings settings = new MessageProducerSettings()
             {
                 HostName = "",
-                VirtualHost = "",
+                VirtualHost = "/",
                 UserName = "",
                 Password = "",
                 PortNumber = 5672,
@@ -228,8 +228,11 @@ namespace tests
             byte[] authToken = Encoding.ASCII.GetBytes($"{userName}:{password}");
             http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(authToken));
 
-            HttpResponseMessage response = http.GetAsync("/api/exchanges/accord").Result;
+            // default virtual host "/" is %2F
+            HttpResponseMessage response = http.GetAsync("/api/exchanges/%2F").Result;
             Console.WriteLine(response.Content.ReadAsStringAsync().Result);
+
+            // https://rawcdn.githack.com/rabbitmq/rabbitmq-server/v3.8.19/deps/rabbitmq_management/priv/www/api/index.html
         }
     }
 }

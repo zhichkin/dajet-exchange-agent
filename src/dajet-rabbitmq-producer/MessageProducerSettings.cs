@@ -12,7 +12,7 @@ namespace DaJet.RabbitMQ.Producer
         public string QueueName { get; set; } = "dajet-queue";
         public string RoutingKey { get; set; } = string.Empty;
         public string ExchangeName { get; set; } = "dajet-exchange";
-        public int ConfirmationTimeout { get; set; } = 3; // seconds
+        public int ConfirmationTimeout { get; set; } = 30; // seconds
         public Dictionary<string, string> MessageTypeRouting { get; set; } = new Dictionary<string, string>();
     }
 }
