@@ -8,6 +8,7 @@ namespace DaJet.RabbitMQ.Producer
     public static class FileLogger
     {
         private static string _filePath;
+        private static object _syncLog = new object();
         private static string GetFilePath()
         {
             if (_filePath != null)
@@ -23,6 +24,13 @@ namespace DaJet.RabbitMQ.Producer
         }
         public static int LogSize { get; set; }
         public static void Log(string text)
+        {
+            lock (_syncLog)
+            {
+                LogSyncronized(text);
+            }
+        }
+        public static void LogSyncronized(string text)
         {
             string filePath = GetFilePath();
             FileInfo file = new FileInfo(filePath);

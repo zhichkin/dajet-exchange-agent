@@ -5,7 +5,7 @@ namespace DaJet.RabbitMQ.Producer
     public sealed class MessageProducerSettings
     {
         public string HostName { get; set; } = "localhost";
-        public string VirtualHost { get; set; } = string.Empty;
+        public string VirtualHost { get; set; } = "/";
         public string UserName { get; set; } = "guest";
         public string Password { get; set; } = "guest";
         public int PortNumber { get; set; } = 5672;

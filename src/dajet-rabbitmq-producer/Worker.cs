@@ -53,7 +53,7 @@ namespace DaJet.RabbitMQ.Producer
             int messagesReceived = 0;
             errorMessage = string.Empty;
 
-            FileLogger.Log("Start receiving messages.");
+            FileLogger.Log("Start receiving messages from database.");
 
             try
             {
@@ -72,7 +72,7 @@ namespace DaJet.RabbitMQ.Producer
                     + ExceptionHelper.GetErrorText(error);
             }
 
-            FileLogger.Log(string.Format("{0} messages received.", sumReceived));
+            FileLogger.Log(string.Format("{0} messages have been received from database successfully.", sumReceived));
         }
         private int AwaitNotification(int timeout)
         {

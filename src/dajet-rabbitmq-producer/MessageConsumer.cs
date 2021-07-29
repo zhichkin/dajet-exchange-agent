@@ -1,6 +1,7 @@
 ﻿using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Text;
@@ -99,16 +100,18 @@ namespace DaJet.RabbitMQ.Producer
                     command.Transaction = transaction;
 
                     reader = command.ExecuteReader();
+                    List<DaJetMessage> batch = new List<DaJetMessage>();
                     while (reader.Read())
                     {
-                        //DaJetMessage message = ProduceMessage(reader);
-                        //MessageProducer.SendMessage(message.MessageBody);
-                        MessageProducer.SendMessage(
-                            reader.GetString("ТипСообщения"),
-                            reader.GetString("ТелоСообщения"));
+                        batch.Add(ProduceMessage(reader));
                     }
                     reader.Close();
                     messagesRecevied = reader.RecordsAffected;
+
+                    if (batch.Count > 0)
+                    {
+                        MessageProducer.Publish(batch);
+                    }
 
                     transaction.Commit();
                 }
@@ -134,12 +137,11 @@ namespace DaJet.RabbitMQ.Producer
         {
             DaJetMessage message = new DaJetMessage()
             {
-                Code = reader.IsDBNull("_Code") ? 0 : (long)reader.GetDecimal("_Code"),
-                Version = reader.IsDBNull("_Version") ? 0 : BitConverter.ToInt64((byte[])reader["_Version"]),
+                UTC = reader.IsDBNull("МоментВремени") ? 0 : (long)reader.GetDecimal("МоментВремени"),
+                Uuid = reader.IsDBNull("Идентификатор") ? Guid.Empty : reader.GetGuid("Идентификатор"),
                 MessageType = reader.IsDBNull("ТипСообщения") ? string.Empty : reader.GetString("ТипСообщения"),
                 MessageBody = reader.IsDBNull("ТелоСообщения") ? string.Empty : reader.GetString("ТелоСообщения"),
-                OperationType = reader.IsDBNull("ТипОперации") ? string.Empty : reader.GetString("ТипОперации"),
-                OperationDate = reader.IsDBNull("ДатаОперации") ? DateTime.MinValue : reader.GetDateTime("ДатаОперации")
+                OperationType = reader.IsDBNull("ТипОперации") ? string.Empty : reader.GetString("ТипОперации")
             };
             return message;
         }
@@ -149,19 +151,19 @@ namespace DaJet.RabbitMQ.Producer
             script.AppendLine("WITH [CTE] AS");
             script.AppendLine("(");
             script.AppendLine($"SELECT TOP({messageCount})");
-            script.AppendLine("[_Code] AS [_Code],");
-            script.AppendLine("[_Version] AS [_Version],");
-            script.AppendLine($"[{QueueInfo.Properties.Where(p => p.Name == "ДатаВремя").FirstOrDefault()?.Field}] AS [ДатаОперации],");
+            script.AppendLine($"[{QueueInfo.Properties.Where(p => p.Name == "МоментВремени").FirstOrDefault()?.Field}] AS [МоментВремени],");
+            script.AppendLine($"CAST([{QueueInfo.Properties.Where(p => p.Name == "Идентификатор").FirstOrDefault()?.Field}] AS uniqueidentifier) AS [Идентификатор],");
             script.AppendLine($"[{QueueInfo.Properties.Where(p => p.Name == "ТипОперации").FirstOrDefault()?.Field}] AS [ТипОперации],");
             script.AppendLine($"[{QueueInfo.Properties.Where(p => p.Name == "ТипСообщения").FirstOrDefault()?.Field}] AS [ТипСообщения],");
             script.AppendLine($"[{QueueInfo.Properties.Where(p => p.Name == "ТелоСообщения").FirstOrDefault()?.Field}] AS [ТелоСообщения]");
             script.AppendLine("FROM");
-            script.AppendLine($"[dbo].[{QueueInfo.TableName}] WITH (ROWLOCK)");
+            script.AppendLine($"[dbo].[{QueueInfo.TableName}] WITH (ROWLOCK, READPAST)");
             script.AppendLine("ORDER BY");
-            script.AppendLine("[_Code] ASC, [_IDRRef] ASC");
+            script.AppendLine($"[{QueueInfo.Properties.Where(p => p.Name == "МоментВремени").FirstOrDefault()?.Field}] ASC,");
+            script.AppendLine($"[{QueueInfo.Properties.Where(p => p.Name == "Идентификатор").FirstOrDefault()?.Field}] ASC");
             script.AppendLine(")");
             script.AppendLine("DELETE [CTE]");
-            script.AppendLine("OUTPUT deleted.[_Code], deleted.[_Version], deleted.[ДатаОперации],");
+            script.AppendLine("OUTPUT deleted.[МоментВремени], deleted.[Идентификатор],");
             script.AppendLine("deleted.[ТипОперации], deleted.[ТипСообщения], deleted.[ТелоСообщения];");
             return script.ToString();
         }
