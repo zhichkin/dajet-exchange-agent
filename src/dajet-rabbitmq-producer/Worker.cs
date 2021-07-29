@@ -36,14 +36,21 @@ namespace DaJet.RabbitMQ.Producer
                 if (!string.IsNullOrEmpty(errorMessage))
                 {
                     FileLogger.Log(errorMessage);
-                    FileLogger.Log(string.Format("Critical error delay of {0} seconds started.", Settings.CriticalErrorDelay / 1000));
-                    await Task.Delay(Settings.CriticalErrorDelay, stoppingToken);
+                    FileLogger.Log(string.Format("Critical error delay of {0} seconds started.", Settings.CriticalErrorDelay));
+                    await Task.Delay(Settings.CriticalErrorDelay * 1000, stoppingToken);
                 }
 
-                int resultCode = AwaitNotification(Settings.WaitForNotificationTimeout);
-                if (resultCode == 1) // notifications are not supported by database
+                if (Settings.UseNotifications)
                 {
-                    await Task.Delay(Settings.ReceivingMessagesPeriodicity, stoppingToken);
+                    int resultCode = AwaitNotification(Settings.WaitForNotificationTimeout * 1000);
+                    if (resultCode == 1) // notifications are not supported by database
+                    {
+                        await Task.Delay(Settings.ReceivingMessagesPeriodicity * 1000, stoppingToken);
+                    }
+                }
+                else
+                {
+                    await Task.Delay(Settings.ReceivingMessagesPeriodicity * 1000, stoppingToken);
                 }
             }
         }
