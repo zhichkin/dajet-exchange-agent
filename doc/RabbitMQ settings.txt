@@ -1,0 +1,21 @@
+В случае обрывов связи со стороны сервера RabbitMQ
+при передачи больших сообщений нужно увеличить таймаут
+(иногда по необходимости) именно со строны сервера RabbitMQ:
+rabbitmq.conf
+
+tcp_listen_options.send_timeout = 120000 (миллисекунды)
+
+Настройка блокировки работы сервера RabbitMQ при превышении
+расхода оперативной памяти выше указанного значения
+(может указываться в процентах от установленной на сервере памяти
+или в абсолютных величинах)
+https://www.rabbitmq.com/memory.html#memsup
+
+rabbitmqctl set_vm_memory_high_watermark 0.65
+rabbitmqctl set_vm_memory_high_watermark absolute "4G"
+
+Настройка блокировки работы сервера RabbitMQ при уменьшении
+свободного места на жёстком диске ниже указанного значения
+https://www.rabbitmq.com/disk-alarms.html
+
+rabbitmqctl set_disk_free_limit 50000000 (50 Mb в байтах)
