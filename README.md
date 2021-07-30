@@ -187,3 +187,5 @@ sc create "DaJet Exchange Agent" binPath="D:\dajet-agent\dajet-rabbitmq-producer
 	
 КонецФункции
 ```
+
+[Подписка на сообщения внешними системами](https://github.com/zhichkin/dajet-exchange-agent/tree/main/doc)

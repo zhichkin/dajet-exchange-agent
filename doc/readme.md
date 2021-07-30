@@ -57,3 +57,4 @@ channel.QueueBind(queueName, exchangeName, routingKey, arguments);
 - **DeliveryMode** - всегда 2 (persistent).
 - **OperationType** - заголовок сообщения. Перечисление: "INSERT", "UPDATE", "DELETE".
 
+![Пример заполнения атрибутов и заголовков сообщений](https://github.com/zhichkin/dajet-exchange-agent/blob/main/doc/message-headers-example.png)
