@@ -32,10 +32,22 @@ namespace DaJet.Export
         private static ApplicationObject catalog;
 
         private static IConnection RmqConnection;
+
+        private static int RowsLimit = 0;
+        private static int BatchSize = 1000;
+
+        private const string HostName = "localhost";
+        private const string VirtualHost = "/";
+        private const string UserName = "guest";
+        private const string Password = "guest";
+        
+        private const string TopicExchangeName = "dajet-exchange";
+        private const string RoutingKey = "РегистрСведений.Тестовый";
         
         public static int Main(string[] args)
         {
-            args = new string[] { "--ms", "ZHICHKIN", "--db", "cerberus" };
+            //args = new string[] { "--ms", "ZHICHKIN", "--db", "cerberus" };
+            //args = new string[] { "--ms", "ZHICHKIN", "--db", "cerberus", "--batch-size", "5", "--rows-limit", "3" };
 
             InitializeConnection();
 
@@ -44,10 +56,12 @@ namespace DaJet.Export
                 new Option<string>("--ms", "Microsoft SQL Server address or name"),
                 new Option<string>("--db", "Database name"),
                 new Option<string>("--u", "User name (Windows authentication is used if not defined)"),
-                new Option<string>("--p", "User password if SQL Server authentication is used")
+                new Option<string>("--p", "User password if SQL Server authentication is used"),
+                new Option<int>("--batch-size", "Number of rows to export in one batch (default is 1000)"),
+                new Option<int>("--rows-limit", "Total number of rows to export from database (default is all rows)")
             };
             command.Description = "DaJet Agent Export Tool";
-            command.Handler = CommandHandler.Create<string, string, string, string>(ExecuteCommand);
+            command.Handler = CommandHandler.Create<string, string, string, string, int, int>(ExecuteCommand);
             return command.Invoke(args);
         }
         private static void ShowErrorMessage(string errorText)
@@ -56,7 +70,7 @@ namespace DaJet.Export
             Console.WriteLine(errorText);
             Console.ForegroundColor = ConsoleColor.White;
         }
-        private static void ExecuteCommand(string ms, string db, string u, string p)
+        private static void ExecuteCommand(string ms, string db, string u, string p, int batchSize, int rowsLimit)
         {
             if (string.IsNullOrWhiteSpace(ms))
             {
@@ -65,6 +79,14 @@ namespace DaJet.Export
             if (string.IsNullOrWhiteSpace(db))
             {
                 ShowErrorMessage(DATABASE_IS_NOT_DEFINED_ERROR); return;
+            }
+            if (batchSize > 0)
+            {
+                BatchSize = batchSize;
+            }
+            if (rowsLimit > 0)
+            {
+                RowsLimit = rowsLimit;
             }
 
             metadata
@@ -91,10 +113,10 @@ namespace DaJet.Export
         {
             IConnectionFactory factory = new ConnectionFactory()
             {
-                HostName = "localhost",
-                VirtualHost = "/",
-                UserName = "guest",
-                Password = "guest",
+                HostName = HostName,
+                VirtualHost = VirtualHost,
+                UserName = UserName,
+                Password = Password,
                 Port = 5672
             };
             RmqConnection = factory.CreateConnection();
@@ -317,7 +339,12 @@ namespace DaJet.Export
         private static string Build_SelectSource_Command(ApplicationObject metaObject)
         {
             StringBuilder script = new StringBuilder();
-            script.AppendLine("SELECT");
+            script.Append("SELECT");
+            if (RowsLimit > 0)
+            {
+                script.Append($" TOP {RowsLimit}");
+            }
+            script.AppendLine();
 
             for (int i = 0; i < metaObject.Properties.Count; i++)
             {
@@ -679,40 +706,47 @@ namespace DaJet.Export
                 Console.WriteLine("Справочник \"Партии\" не найден."); return;
             }
 
+            Stopwatch watch = new Stopwatch();
+
             try
             {
                 DeleteTargetTable(metadata, catalog);
                 Console.WriteLine("Таблица \"[Справочник_Партии]\" удалена.");
+
                 CreateTargetTable(metadata, catalog);
                 Console.WriteLine("Таблица \"[Справочник_Партии]\" создана.");
+
+                Console.WriteLine("Таблица \"[Справочник_Партии]\" начало копирования: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                watch.Start();
                 InsertTargetTable(metadata, catalog);
-                Console.WriteLine("Таблица \"[Справочник_Партии]\" скопирована.");
+                watch.Stop();
+                Console.WriteLine("Elapsed (копирование) = " + watch.ElapsedMilliseconds.ToString() + " ms");
+                Console.WriteLine("Таблица \"[Справочник_Партии]\" скопирована: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             }
             catch (Exception error)
             {
                 ShowErrorMessage(error.Message); return;
             }
 
-            Stopwatch watch = new Stopwatch();
-            watch.Start();
-
+            watch.Restart();
             try
             {
+                Console.WriteLine("Таблица \"[Справочник_Партии]\" начало выгрузки: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
                 ExecuteJob_Справочник_Партии(metadata);
-                Console.WriteLine("Таблица \"[Справочник_Партии]\" выгружена.");
+                Console.WriteLine("Таблица \"[Справочник_Партии]\" выгружена: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             }
             catch (Exception error)
             {
                 ShowErrorMessage(error.Message); return;
             }
-
             watch.Stop();
-            Console.WriteLine("Elapsed = " + watch.ElapsedMilliseconds.ToString());
+            Console.WriteLine("Elapsed = " + watch.ElapsedMilliseconds.ToString() + " ms");
 
             try
             {
+                Console.WriteLine("Таблица \"[Справочник_Партии]\" начало удаления: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
                 DeleteTargetTable(metadata, catalog);
-                Console.WriteLine("Таблица \"[Справочник_Партии]\" удалена.");
+                Console.WriteLine("Таблица \"[Справочник_Партии]\" удалена: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             }
             catch (Exception error)
             {
@@ -744,9 +778,10 @@ namespace DaJet.Export
             }
 
             int end = 0;
-            int step = 4;
             int start = 1;
             int nextThread = 0;
+            int step = BatchSize;
+
             while (MaxRowNumber >= start)
             {
                 end = start + step - 1;
@@ -767,17 +802,6 @@ namespace DaJet.Export
 
                 start = start + step;
             }
-
-            //for (int i = 0; i < MaxThreads; i++)
-            //{
-            //    Queue<BatchInfo> queue = jobs[i];
-            //    Console.WriteLine($"Thread {i}:");
-            //    while (queue.Count > 0)
-            //    {
-            //        BatchInfo batch = queue.Dequeue();
-            //        Console.WriteLine($"\tBatch from {batch.RowNumber1} to {batch.RowNumber2}");
-            //    }
-            //}
 
             int messagesSent = ExecuteJobsInParallel(jobs);
             Console.WriteLine($"Messages sent = {messagesSent}");
@@ -820,9 +844,9 @@ namespace DaJet.Export
             int counter = 0;
             while (info.Batches.Count > 0)
             {
-                counter += ExecuteJob(info.Channel, info.Properties, info.Batches.Dequeue());
-                
-                WaitForConfirms(info.Channel); // wait for each 1000-th message ?
+                int messagesSent = ExecuteJob(info.Channel, info.Properties, info.Batches.Dequeue());
+                Console.WriteLine($"{messagesSent} messages sent successfully.");
+                counter += messagesSent;
             }
 
             return counter;
@@ -847,44 +871,26 @@ namespace DaJet.Export
                     {
                         while (reader.Read())
                         {
-                            SendMessage(channel, properties, reader.GetString("Description"));
+                            SendMessage(channel, properties, reader);
+                            
                             messagesSent++;
-
-                            //T item = new T();
-                            //MapDataToObject(reader, item, catalog);
-                            //list.Add(item);
                         }
                         reader.Close();
+
+                        WaitForConfirms(channel);
                     }
                 }
             }
 
             return messagesSent;
         }
-        private static void SendMessage(IModel channel, IBasicProperties properties, string message)
+        private static void SendMessage(IModel channel, IBasicProperties properties, SqlDataReader reader)
         {
-            byte[] messageBytes = Encoding.UTF8.GetBytes(message);
+            byte[] messageBytes = Serialize_Справочник_Партии(reader);
 
             properties.MessageId = Guid.NewGuid().ToString();
             
-            channel.BasicPublish("dajet-exchange", "РегистрСведений.Тестовый", properties, messageBytes);
-
-            Console.WriteLine($"Message sent: {message}, thread: {Thread.CurrentThread.ManagedThreadId}");
-
-            //List<Партии> list = SelectCatalogItems<Партии>(metadata, metaObject);
-
-            //Console.WriteLine($"Справочник \"Партии\" = {list.Count} items.");
-
-            //int counter = 0;
-            //foreach (Партии item in list)
-            //{
-            //    string json = SerializeCatalogItem(item);
-
-            //    if (counter == 0)
-            //    {
-            //        Console.WriteLine(json);
-            //    }
-            //}
+            channel.BasicPublish(TopicExchangeName, RoutingKey, properties, messageBytes);
         }
         private static void WaitForConfirms(IModel channel)
         {
@@ -919,6 +925,77 @@ namespace DaJet.Export
             }
         }
 
+        private static byte[] Serialize_Справочник_Партии(SqlDataReader reader)
+        {
+            JsonWriterOptions options = new JsonWriterOptions
+            {
+                Indented = false,
+                Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+            };
+
+            //byte[] buffer = ArrayPool<byte>.Shared.Rent(4096);
+            //ArrayPool<byte>.Shared.Return(buffer);
+
+            MemoryStream stream = new MemoryStream(2048);
+            Utf8JsonWriter writer = new Utf8JsonWriter(stream, options);
+
+            writer.WriteStartObject();
+            writer.WriteString("#type", "jcfg:CatalogObject.Партии");
+
+            writer.WritePropertyName("#value");
+            writer.WriteStartObject();
+
+            //int ownerOrdinal = reader.GetOrdinal("Owner");
+            //List<string> propertyNames = new List<string>(reader.FieldCount);
+            //for (int i = 0; i < reader.FieldCount; i++)
+            //{
+            //    propertyNames.Add(reader.GetName(i));
+            //}
+
+            for (int i = 0; i < reader.FieldCount; i++)
+            {
+                if (reader.GetName(i) == "Owner")
+                {
+                    writer.WritePropertyName("Owner");
+                    writer.WriteStartObject();
+                    writer.WriteString("#type", "jcfg:CatalogRef.Номенклатура");
+                    writer.WriteString("#value", reader.GetString(i));
+                    writer.WriteEndObject();
+                }
+                else
+                {
+                    writer.WritePropertyName(reader.GetName(i));
+
+                    Type type = reader.GetFieldType(i);
+
+                    if (type == typeof(decimal))
+                    {
+                        writer.WriteNumberValue(reader.GetDecimal(i));
+                    }
+                    else if (type == typeof(bool))
+                    {
+                        writer.WriteBooleanValue(reader.GetBoolean(i));
+                    }
+                    else if (type == typeof(DateTime))
+                    {
+                        writer.WriteStringValue(reader.GetDateTime(i).ToString("yyyy-MM-ddThh:mm:ss"));
+                    }
+                    else if (type == typeof(string))
+                    {
+                        writer.WriteStringValue(reader.GetString(i));
+                    }
+                    else
+                    {
+                        writer.WriteNullValue();
+                    }
+                }
+            }
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+            writer.Flush();
+
+            return stream.ToArray();
+        }
 
         private static void GetTableNames(InfoBase infoBase)
         {
