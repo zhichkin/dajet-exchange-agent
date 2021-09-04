@@ -40,16 +40,18 @@ namespace DaJet.Export
         private const string VirtualHost = "/";
         private const string UserName = "guest";
         private const string Password = "guest";
-        
-        private const string TopicExchangeName = "dajet-exchange";
-        private const string RoutingKey = "РегистрСведений.Тестовый";
-        
+
+        private const string TopicExchangeName = "accord.dajet.exchange"; // "dajet-exchange";
+        private const string RoutingKey = "Справочник.Партии"; // "РегистрСведений.Тестовый";
+
+        // MultipleActiveResultSets=True
+
         public static int Main(string[] args)
         {
             //args = new string[] { "--ms", "ZHICHKIN", "--db", "cerberus" };
-            //args = new string[] { "--ms", "ZHICHKIN", "--db", "cerberus", "--batch-size", "5", "--rows-limit", "3" };
+            //args = new string[] { "--ms", "ZHICHKIN", "--db", "cerberus", "--batch-size", "2", "--rows-limit", "5" };
 
-            InitializeConnection();
+            //InitializeConnection();
 
             RootCommand command = new RootCommand()
             {
@@ -93,15 +95,25 @@ namespace DaJet.Export
                 .UseDatabaseProvider(DatabaseProvider.SQLServer)
                 .ConfigureConnectionString(ms, db, u, p);
 
-            Console.WriteLine($"Open metadata for database \"{db}\" on server \"{ms}\" ...");
-            Stopwatch watch = new Stopwatch();
-            watch.Start();
-            InfoBase infoBase = metadata.OpenInfoBase();
-            watch.Stop();
-            Console.WriteLine($"Metadata is opened successfully.");
-            Console.WriteLine($"Elapsed: {watch.ElapsedMilliseconds} ms");
+            Документ_Чек_Exporter exporter = new Документ_Чек_Exporter(metadata);
+            try
+            {
+                exporter.ExportDocuments();
+            }
+            catch (Exception error)
+            {
+                ShowErrorMessage(error.Message);
+            }
 
-            Export_Справочник_Партии(metadata, infoBase);
+            //Console.WriteLine($"Open metadata for database \"{db}\" on server \"{ms}\" ...");
+            //Stopwatch watch = new Stopwatch();
+            //watch.Start();
+            //InfoBase infoBase = metadata.OpenInfoBase();
+            //watch.Stop();
+            //Console.WriteLine($"Metadata is opened successfully.");
+            //Console.WriteLine($"Elapsed: {watch.ElapsedMilliseconds} ms");
+
+            //Export_Справочник_Партии(metadata, infoBase);
 
             //GetTableNames(infoBase);
 
@@ -844,9 +856,17 @@ namespace DaJet.Export
             int counter = 0;
             while (info.Batches.Count > 0)
             {
-                int messagesSent = ExecuteJob(info.Channel, info.Properties, info.Batches.Dequeue());
-                Console.WriteLine($"{messagesSent} messages sent successfully.");
-                counter += messagesSent;
+                try
+                {
+                    int messagesSent = ExecuteJob(info.Channel, info.Properties, info.Batches.Dequeue());
+                    Console.WriteLine($"{messagesSent} messages sent successfully.");
+                    counter += messagesSent;
+                }
+                catch (Exception error)
+                {
+                    ShowErrorMessage(error.Message);
+                    break;
+                }
             }
 
             return counter;
@@ -854,6 +874,11 @@ namespace DaJet.Export
         private static int ExecuteJob(IModel channel, IBasicProperties properties, BatchInfo batch)
         {
             int messagesSent = 0;
+
+            Stopwatch watch = new Stopwatch();
+            watch.Start();
+
+            Console.WriteLine($"Execute job start: {batch.RowNumber1} - {batch.RowNumber2}");
 
             using (SqlConnection connection = new SqlConnection(metadata.ConnectionString))
             {
@@ -881,6 +906,9 @@ namespace DaJet.Export
                     }
                 }
             }
+
+            watch.Stop();
+            Console.WriteLine($"Executing job {batch.RowNumber1} - {batch.RowNumber2} elapsed in {watch.ElapsedMilliseconds} ms");
 
             return messagesSent;
         }
