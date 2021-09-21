@@ -1,20 +1,28 @@
 ﻿using DaJet.Metadata;
 using DaJet.Metadata.Model;
 using Microsoft.Data.SqlClient;
+using Microsoft.IO;
 using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
-using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Unicode;
 
 namespace DaJet.Export
 {
     public sealed class Документ_Чек_Exporter
     {
         private const string DOCUMENT_NAME = "Чеки";
+
+        private RecyclableMemoryStreamManager StreamManager = new RecyclableMemoryStreamManager();
+
         private IMetadataService Metadata { get; }
+        private InfoBase InfoBase { get; set; }
         private ApplicationObject Document { get; set; }
         public Документ_Чек_Exporter(IMetadataService metadata)
         {
@@ -27,11 +35,11 @@ namespace DaJet.Export
             Console.WriteLine($"Opening metadata: {Metadata.ConnectionString} ...");
             Stopwatch watch = new Stopwatch();
             watch.Start();
-            InfoBase infoBase = Metadata.OpenInfoBase();
+            InfoBase = Metadata.OpenInfoBase();
             watch.Stop();
             Console.WriteLine($"Metadata is opened successfully in {watch.ElapsedMilliseconds} ms");
 
-            Document = infoBase.Documents.Values.Where(c => c.Name == DOCUMENT_NAME).FirstOrDefault();
+            Document = InfoBase.Documents.Values.Where(c => c.Name == DOCUMENT_NAME).FirstOrDefault();
 
             if (Document == null)
             {
@@ -56,6 +64,8 @@ namespace DaJet.Export
 
             if (Document == null) return;
 
+            DataMapper mapper = new DataMapper(InfoBase, Document);
+
             List<DocumentBatchInfo> batches = GetBatchesInfo();
             if (batches.Count == 0)
             {
@@ -63,12 +73,24 @@ namespace DaJet.Export
                 return;
             }
 
-            foreach (DocumentBatchInfo batch in batches)
+            JsonWriterOptions options = new JsonWriterOptions()
             {
-                ExportBatch(batch);
+                Indented = false,
+                Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+            };
+
+            using (MemoryStream stream = StreamManager.GetStream())
+            {
+                using (Utf8JsonWriter writer = new Utf8JsonWriter(stream, options))
+                {
+                    foreach (DocumentBatchInfo batch in batches)
+                    {
+                        ExportBatch(batch, mapper, stream, writer);
+                    }
+                }
             }
         }
-        private void ExportBatch(DocumentBatchInfo batch)
+        private void ExportBatch(DocumentBatchInfo batch, DataMapper mapper, MemoryStream stream, Utf8JsonWriter writer)
         {
             TablePart table = Document.TableParts.Where(t => t.Name == "Реализация").FirstOrDefault();
             if (table == null)
@@ -77,6 +99,8 @@ namespace DaJet.Export
                 return;
             }
 
+            // InfoBase.ReferenceTypeCodes.TryGetValue()
+
             using (SqlConnection connection = new SqlConnection(GetMARSConnectionString()))
             {
                 connection.Open();
@@ -84,17 +108,18 @@ namespace DaJet.Export
                 using (SqlCommand command1 = connection.CreateCommand())
                 {
                     command1.CommandType = CommandType.Text;
-                    command1.CommandText = SelectDocuments_Script();
+                    //command1.CommandText = SelectDocuments_Script();
                     command1.CommandTimeout = 60; // seconds
+                    mapper.ConfigureSelectCommand(command1);
 
-                    command1.Parameters.AddWithValue("Period1", new DateTime(4021, 9, 3, 0, 0, 0));
-                    command1.Parameters.AddWithValue("Period2", new DateTime(4021, 9, 4, 0, 0, 0));
+                    //command1.Parameters.AddWithValue("Period1", batch.Period1);
+                    //command1.Parameters.AddWithValue("Period2", batch.Period2);
 
                     using (SqlCommand command2 = connection.CreateCommand())
                     {
                         command2.CommandType = CommandType.Text;
                         command2.CommandText = SelectDocumentTablePart_Script(table);
-                        command2.CommandTimeout = 60; // seconds
+                        command2.CommandTimeout = 600; // seconds
 
                         command2.Parameters.Add("Ref", SqlDbType.Binary, 16);
 
@@ -102,28 +127,50 @@ namespace DaJet.Export
                         {
                             while (reader1.Read())
                             {
-                                byte[] doc = (byte[])reader1["Ref"];
-                                command2.Parameters["Ref"].Value = doc;
+                                mapper.MapDataToJson(reader1, writer);
+                                writer.Flush();
+                                
+                                ReadOnlySpan<byte> span = new ReadOnlySpan<byte>(stream.GetBuffer(), 0, (int)writer.BytesCommitted);
 
-                                Console.WriteLine("Document = " + (new Guid(doc)).ToString());
+                                writer.Reset();
+                                stream.Position = 0;
 
-                                using (SqlDataReader reader2 = command2.ExecuteReader())
-                                {
-                                    while (reader2.Read())
-                                    {
-                                        for (int f = 0; f < reader2.FieldCount; f++)
-                                        {
-                                            Console.WriteLine(reader2.GetName(f) + " = " + reader2.GetValue(f).ToString());
-                                        }
-                                    }
-                                    reader2.Close();
-                                }
+                                Console.WriteLine(Encoding.UTF8.GetString(span));
+
+                                //command2.Parameters["Ref"].Value = reader1["Ref"];
+
+                                ////Console.WriteLine("Document = " + (new Guid(doc)).ToString());
+
+                                //using (SqlDataReader reader2 = command2.ExecuteReader())
+                                //{
+                                //    while (reader2.Read())
+                                //    {
+                                //        for (int f = 0; f < reader2.FieldCount; f++)
+                                //        {
+                                //            Console.WriteLine(reader2.GetName(f) + " = " + reader2.GetValue(f).ToString());
+                                //        }
+                                //    }
+                                //    reader2.Close();
+                                //}
                             }
                             reader1.Close();
                         }
                     }
                 }
             }
+        }
+
+
+
+        private string GetPropertyName(MetadataProperty property)
+        {
+            if (property.Name == "Ссылка") return "Ref";
+            else if (property.Name == "ВерсияДанных") return string.Empty;
+            else if (property.Name == "ПометкаУдаления") return "DeletionMark";
+            else if (property.Name == "Дата") return "Date";
+            else if (property.Name == "Номер") return "Number";
+            else if (property.Name == "Проведен") return "Posted";
+            return property.Name;
         }
 
         private string SelectPeriods_Script()
@@ -145,7 +192,19 @@ namespace DaJet.Export
         private string SelectDocuments_Script()
         {
             StringBuilder script = new StringBuilder();
-            script.AppendLine("SELECT TOP 3");
+            script.AppendLine("SELECT TOP 1");
+
+            foreach (MetadataProperty property in Document.Properties)
+            {
+                string propertyName = GetPropertyName(property);
+
+                foreach (DatabaseField field in property.Fields)
+                {
+                    script.Append($"\t{field.Name} AS [{propertyName}]");
+                    //if(field.Purpose == FieldPurpose.)
+                }
+            }
+
             script.AppendLine("\t_IDRRef AS [Ref]");
             script.AppendLine($"FROM {Document.TableName}");
             script.AppendLine("WHERE _Marked = 0x00");
@@ -203,6 +262,31 @@ namespace DaJet.Export
             }
 
             return list;
+        }
+
+        private void Serialize_Документ_Чеки()
+        {
+            JsonWriterOptions options = new JsonWriterOptions
+            {
+                Indented = false,
+                Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+            };
+
+            MemoryStream stream = new MemoryStream(2048);
+            Utf8JsonWriter writer = new Utf8JsonWriter(stream, options);
+
+            writer.WriteStartObject();
+            writer.WriteString("#type", "jcfg:CatalogObject.Партии");
+
+            writer.WritePropertyName("#value");
+            writer.WriteStartObject();
+
+            writer.Flush();
+
+            ReadOnlySpan<byte> span = new ReadOnlySpan<byte>(stream.GetBuffer(), 0, (int)writer.BytesCommitted);
+
+            writer.Reset();
+            stream.Position = 0;
         }
     }
 }

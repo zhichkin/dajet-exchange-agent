@@ -2,6 +2,7 @@
 using DaJet.Metadata;
 using DaJet.Metadata.Model;
 using Microsoft.Data.SqlClient;
+using Microsoft.IO;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Exceptions;
 using System;
@@ -24,22 +25,16 @@ namespace DaJet.Export
 {
     public static class Program
     {
+        private static object ConsoleSyncRoot = new object();
         private const string PRESS_ANY_KEY_TO_EXIT_MESSAGE = "Press any key to exit.";
         private const string SERVER_IS_NOT_DEFINED_ERROR = "Server address is not defined.";
         private const string DATABASE_IS_NOT_DEFINED_ERROR = "Database name is not defined.";
 
         private static IMetadataService metadata = new MetadataService();
-        private static ApplicationObject catalog;
-
-        private static IConnection RmqConnection;
-
+        
         private static int RowsLimit = 0;
         private static int BatchSize = 1000;
-
-        private const string HostName = "localhost";
-        private const string VirtualHost = "/";
-        private const string UserName = "guest";
-        private const string Password = "guest";
+        private static int WaitForConfirmsTimeout = 30; // seconds
 
         private const string TopicExchangeName = "accord.dajet.exchange"; // "dajet-exchange";
         private const string RoutingKey = "Справочник.Партии"; // "РегистрСведений.Тестовый";
@@ -49,9 +44,7 @@ namespace DaJet.Export
         public static int Main(string[] args)
         {
             //args = new string[] { "--ms", "ZHICHKIN", "--db", "cerberus" };
-            //args = new string[] { "--ms", "ZHICHKIN", "--db", "cerberus", "--batch-size", "2", "--rows-limit", "5" };
-
-            //InitializeConnection();
+            //args = new string[] { "--ms", "ZHICHKIN", "--db", "cerberus", "--batch-size", "33000" };
 
             RootCommand command = new RootCommand()
             {
@@ -68,9 +61,28 @@ namespace DaJet.Export
         }
         private static void ShowErrorMessage(string errorText)
         {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine(errorText);
-            Console.ForegroundColor = ConsoleColor.White;
+            lock (ConsoleSyncRoot)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine(errorText);
+                Console.ForegroundColor = ConsoleColor.White;
+            }
+        }
+        private static void ShowConsoleMessage(string messageText)
+        {
+            lock (ConsoleSyncRoot)
+            {
+                Console.WriteLine(messageText);
+            }
+        }
+        private static void ShowSuccessMessage(string errorText)
+        {
+            lock (ConsoleSyncRoot)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine(errorText);
+                Console.ForegroundColor = ConsoleColor.White;
+            }
         }
         private static void ExecuteCommand(string ms, string db, string u, string p, int batchSize, int rowsLimit)
         {
@@ -95,961 +107,58 @@ namespace DaJet.Export
                 .UseDatabaseProvider(DatabaseProvider.SQLServer)
                 .ConfigureConnectionString(ms, db, u, p);
 
-            Документ_Чек_Exporter exporter = new Документ_Чек_Exporter(metadata);
+            ShowConsoleMessage($"Open metadata for database \"{db}\" on server \"{ms}\" ...");
+            Stopwatch watch = new Stopwatch();
+            watch.Start();
+            InfoBase infoBase = metadata.OpenInfoBase();
+            watch.Stop();
+            ShowConsoleMessage($"Metadata is opened successfully.");
+            ShowConsoleMessage($"Elapsed: {watch.ElapsedMilliseconds} ms");
+
+            //GetTableNames(infoBase);
+
+            CatalogExporter exporter = new CatalogExporter()
+            {
+                ReportSuccess = (batch) =>
+                {
+                    ShowConsoleMessage($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {batch.RowNumber1}-{batch.RowNumber2} confirmed successfully.");
+                },
+                ReportFailure = (batch) =>
+                {
+                    ShowErrorMessage($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {batch.RowNumber1}-{batch.RowNumber2} failed to confirm.");
+                }
+            }
+            .UseDatabase(metadata.ConnectionString)
+            .ConfigureRabbitMQ("localhost", "/", "guest", "guest")
+            .UseInfoBase(infoBase)
+            .UseCatalog("Партии")
+            .UseExchange(TopicExchangeName)
+            .UseBinding(RoutingKey);
+
             try
             {
-                exporter.ExportDocuments();
+                watch.Reset();
+                watch.Start();
+                int messagesSent = exporter.ExportCatalogToRabbitMQ(BatchSize);
+                watch.Stop();
+
+                ShowSuccessMessage($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Messages sent: {messagesSent}");
+                ShowSuccessMessage($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Elapsed: {watch.ElapsedMilliseconds} ms");
+
+                //Документ_Чек_Exporter exporter = new Документ_Чек_Exporter(metadata);
+                //exporter.ExportDocuments();
             }
             catch (Exception error)
             {
                 ShowErrorMessage(error.Message);
+                ShowErrorMessage(error.StackTrace);
             }
 
-            //Console.WriteLine($"Open metadata for database \"{db}\" on server \"{ms}\" ...");
-            //Stopwatch watch = new Stopwatch();
-            //watch.Start();
-            //InfoBase infoBase = metadata.OpenInfoBase();
-            //watch.Stop();
-            //Console.WriteLine($"Metadata is opened successfully.");
-            //Console.WriteLine($"Elapsed: {watch.ElapsedMilliseconds} ms");
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
 
-            //Export_Справочник_Партии(metadata, infoBase);
-
-            //GetTableNames(infoBase);
-
-            Console.WriteLine(PRESS_ANY_KEY_TO_EXIT_MESSAGE);
+            ShowConsoleMessage(PRESS_ANY_KEY_TO_EXIT_MESSAGE);
             Console.ReadKey(false);
-        }
-
-        private static void InitializeConnection()
-        {
-            IConnectionFactory factory = new ConnectionFactory()
-            {
-                HostName = HostName,
-                VirtualHost = VirtualHost,
-                UserName = UserName,
-                Password = Password,
-                Port = 5672
-            };
-            RmqConnection = factory.CreateConnection();
-        }
-        private static IModel CreateChannel()
-        {
-            IModel channel = RmqConnection.CreateModel();
-            channel.ConfirmSelect();
-            return channel;
-        }
-        private static IBasicProperties CreateMessageProperties(IModel channel)
-        {
-            IBasicProperties properties = channel.CreateBasicProperties();
-            properties.ContentType = "application/json";
-            properties.DeliveryMode = 2; // persistent
-            properties.ContentEncoding = "UTF-8";
-            properties.AppId = "ERP";
-            properties.Type = "Справочник.Партии";
-            SetOperationTypeHeader(properties);
-            return properties;
-        }
-        private static void SetOperationTypeHeader(IBasicProperties properties)
-        {
-            if (properties.Headers == null)
-            {
-                properties.Headers = new Dictionary<string, object>();
-            }
-
-            if (!properties.Headers.TryAdd("OperationType", "INSERT"))
-            {
-                properties.Headers["OperationType"] = "INSERT";
-            }
-        }
-
-
-        private static string GetPropertyType(MetadataProperty property)
-        {
-            if (property.PropertyType.IsMultipleType) return "object";
-            else if (property.PropertyType.IsUuid) return "Guid";
-            else if (property.PropertyType.CanBeString) return "string";
-            else if (property.PropertyType.CanBeNumeric) return "decimal";
-            else if (property.PropertyType.CanBeBoolean) return "bool";
-            else if (property.PropertyType.CanBeDateTime) return "DateTime";
-            else if (property.PropertyType.CanBeReference) return "Guid";
-
-            return "object";
-        }
-        private static string GetPropertyName(MetadataProperty property)
-        {
-            if (property.Name == "Ссылка") return "Ref";
-            else if (property.Name == "ВерсияДанных") return string.Empty;
-            else if (property.Name == "Предопределённый") return string.Empty;
-            else if (property.Name == "ПометкаУдаления") return "DeletionMark";
-            else if (property.Name == "Владелец") return "Owner";
-            else if (property.Name == "Код") return "Code";
-            else if (property.Name == "Наименование") return "Description";
-
-            return property.Name;
-        }
-
-        private static string BuildClassSourceCode(ApplicationObject metaObject)
-        {
-            StringBuilder script = new StringBuilder();
-            script.AppendLine($"public sealed class {metaObject.Name}");
-            script.AppendLine("{");
-
-            for (int i = 0; i < metaObject.Properties.Count; i++)
-            {
-                MetadataProperty property = metaObject.Properties[i];
-
-                string propertyType = GetPropertyType(property);
-                string propertyName = GetPropertyName(property);
-
-                if (string.IsNullOrEmpty(propertyName))
-                {
-                    continue;
-                }
-
-                script.AppendLine($"public {propertyType} {propertyName} {{ get; set; }}");
-            }
-
-            script.AppendLine("}");
-
-            return script.ToString();
-        }
-
-        private static string Build_DeleteTable_Command(ApplicationObject metaObject)
-        {
-            StringBuilder script = new StringBuilder();
-
-            script.AppendLine("IF EXISTS(SELECT 1 FROM sys.tables WHERE name = 'Справочник_Партии')");
-            script.AppendLine("BEGIN");
-            script.AppendLine("\tDROP TABLE [Справочник_Партии];");
-            script.AppendLine("END;");
-
-            return script.ToString();
-        }
-        private static string Build_CreateTable_Command(ApplicationObject metaObject)
-        {
-            StringBuilder script = new StringBuilder();
-
-            script.AppendLine("CREATE TABLE [Справочник_Партии]");
-            script.AppendLine("(");
-            script.AppendLine("\t[RowNumber] int IDENTITY(1,1) PRIMARY KEY,");
-
-            for (int i = 0; i < metaObject.Properties.Count; i++)
-            {
-                MetadataProperty property = metaObject.Properties[i];
-
-                string propertyType = GetPropertyType(property);
-                string propertyName = GetPropertyName(property);
-
-                if (string.IsNullOrEmpty(propertyName))
-                {
-                    continue;
-                }
-
-                for (int ii = 0; ii < property.Fields.Count; ii++)
-                {
-                    DatabaseField field = property.Fields[ii];
-
-                    if (propertyType == "Guid")
-                    {
-                        script.Append($"\t[{propertyName}] nvarchar(36) NOT NULL");
-                    }
-                    else if (propertyType == "bool")
-                    {
-                        script.Append($"\t[{propertyName}] bit NOT NULL");
-                    }
-                    else if (propertyType == "decimal")
-                    {
-                        script.Append($"\t[{propertyName}] numeric({field.Precision},{field.Scale}) NOT NULL");
-                    }
-                    else if (propertyType == "DateTime")
-                    {
-                        script.Append($"\t[{propertyName}] datetime2 NOT NULL");
-                    }
-                    else if (propertyType == "string")
-                    {
-                        script.Append($"\t[{propertyName}] {field.TypeName}({field.Length}) NOT NULL");
-                    }
-                    else
-                    {
-                        continue;
-                    }
-
-                    if (i != (metaObject.Properties.Count - 1))
-                    {
-                        script.Append(",");
-                    }
-                    else if (ii != (property.Fields.Count - 1))
-                    {
-                        script.Append(",");
-                    }
-
-                    script.AppendLine();
-                }
-            }
-
-            script.AppendLine(");");
-
-            return script.ToString();
-        }
-        private static string Build_InsertTable_Command(ApplicationObject metaObject)
-        {
-            StringBuilder script = new StringBuilder();
-            script.AppendLine("INSERT [Справочник_Партии]");
-            script.AppendLine("(");
-            
-            for (int i = 0; i < metaObject.Properties.Count; i++)
-            {
-                MetadataProperty property = metaObject.Properties[i];
-
-                string propertyType = GetPropertyType(property);
-                string propertyName = GetPropertyName(property);
-
-                if (string.IsNullOrEmpty(propertyName))
-                {
-                    continue;
-                }
-
-                for (int ii = 0; ii < property.Fields.Count; ii++)
-                {
-                    DatabaseField field = property.Fields[ii];
-
-                    if (propertyType == "Guid"
-                        || propertyType == "bool"
-                        || propertyType == "decimal"
-                        || propertyType == "DateTime"
-                        || propertyType == "string")
-                    {
-                        script.Append($"\t[{propertyName}]");
-                    }
-                    else
-                    {
-                        continue;
-                    }
-
-                    if (i != (metaObject.Properties.Count - 1))
-                    {
-                        script.Append(",");
-                    }
-                    else if (ii != (property.Fields.Count - 1))
-                    {
-                        script.Append(",");
-                    }
-
-                    script.AppendLine();
-                }
-            }
-
-            script.AppendLine(")");
-
-            script.AppendLine(Build_SelectSource_Command(metaObject));
-
-            script.Append(";");
-
-            return script.ToString();
-        }
-        private static string Build_SelectSource_Command(ApplicationObject metaObject)
-        {
-            StringBuilder script = new StringBuilder();
-            script.Append("SELECT");
-            if (RowsLimit > 0)
-            {
-                script.Append($" TOP {RowsLimit}");
-            }
-            script.AppendLine();
-
-            for (int i = 0; i < metaObject.Properties.Count; i++)
-            {
-                MetadataProperty property = metaObject.Properties[i];
-
-                string propertyType = GetPropertyType(property);
-                string propertyName = GetPropertyName(property);
-
-                if (string.IsNullOrEmpty(propertyName))
-                {
-                    continue;
-                }
-
-                for (int ii = 0; ii < property.Fields.Count; ii++)
-                {
-                    DatabaseField field = property.Fields[ii];
-
-                    if (propertyType == "Guid")
-                    {
-                        script.Append($"\t[dbo].[fn_sql_to_1c_uuid]({field.Name}) AS [{propertyName}]");
-                    }
-                    else if (propertyType == "bool")
-                    {
-                        script.Append($"\tCAST({field.Name} AS bit) AS [{propertyName}]");
-                    }
-                    else
-                    {
-                        script.Append($"\t{field.Name} AS [{propertyName}]");
-                    }
-
-                    if (i != (metaObject.Properties.Count - 1))
-                    {
-                        script.Append(",");
-                    }
-                    else if (ii != (property.Fields.Count - 1))
-                    {
-                        script.Append(",");
-                    }
-
-                    script.AppendLine();
-                }
-            }
-
-            script.AppendLine("FROM");
-            script.Append("\t");
-            script.Append(metaObject.TableName);
-            script.Append(";");
-
-            return script.ToString();
-        }
-        private static string Build_SelectTarget_Command(ApplicationObject metaObject)
-        {
-            StringBuilder script = new StringBuilder();
-            script.AppendLine("SELECT");
-
-            for (int i = 0; i < metaObject.Properties.Count; i++)
-            {
-                MetadataProperty property = metaObject.Properties[i];
-
-                string propertyType = GetPropertyType(property);
-                string propertyName = GetPropertyName(property);
-
-                if (string.IsNullOrEmpty(propertyName))
-                {
-                    continue;
-                }
-
-                script.Append($"\t[{propertyName}]");
-
-                if (i != (metaObject.Properties.Count - 1))
-                {
-                    script.Append(",");
-                }
-                script.AppendLine();
-            }
-
-            script.AppendLine("FROM");
-            script.Append("\t");
-            script.Append("[Справочник_Партии]");
-            script.Append(";");
-
-            return script.ToString();
-        }
-        private static string Build_SelectMaxRowNumber_Command()
-        {
-            StringBuilder script = new StringBuilder();
-
-            script.AppendLine("SELECT MAX(RowNumber) AS [MaxRowNumber] FROM [Справочник_Партии];");
-
-            return script.ToString();
-        }
-        private static string Build_SelectBatch_Command(ApplicationObject metaObject)
-        {
-            StringBuilder script = new StringBuilder();
-            script.AppendLine("SELECT");
-
-            for (int i = 0; i < metaObject.Properties.Count; i++)
-            {
-                MetadataProperty property = metaObject.Properties[i];
-
-                string propertyType = GetPropertyType(property);
-                string propertyName = GetPropertyName(property);
-
-                if (string.IsNullOrEmpty(propertyName))
-                {
-                    continue;
-                }
-
-                script.Append($"\t[{propertyName}]");
-
-                if (i != (metaObject.Properties.Count - 1))
-                {
-                    script.Append(",");
-                }
-                script.AppendLine();
-            }
-
-            script.AppendLine("FROM");
-            script.AppendLine("\t[Справочник_Партии]");
-            script.AppendLine("WHERE");
-            script.Append("\t[RowNumber] BETWEEN @RowNumber1 AND @RowNumber2;");
-
-            return script.ToString();
-        }
-
-        private static void DeleteTargetTable(IMetadataService metadata, ApplicationObject metaObject)
-        {
-            string script = Build_DeleteTable_Command(metaObject);
-
-            using (SqlConnection connection = new SqlConnection(metadata.ConnectionString))
-            {
-                connection.Open();
-
-                using (SqlCommand command = connection.CreateCommand())
-                {
-                    command.CommandType = CommandType.Text;
-                    command.CommandText = script;
-                    command.CommandTimeout = 60; // seconds
-
-                    int rowsAffected = command.ExecuteNonQuery();
-                }
-            }
-        }
-        private static void CreateTargetTable(IMetadataService metadata, ApplicationObject metaObject)
-        {
-            string script = Build_CreateTable_Command(metaObject);
-
-            using (SqlConnection connection = new SqlConnection(metadata.ConnectionString))
-            {
-                connection.Open();
-
-                using (SqlCommand command = connection.CreateCommand())
-                {
-                    command.CommandType = CommandType.Text;
-                    command.CommandText = script;
-                    command.CommandTimeout = 60; // seconds
-
-                    int rowsAffected = command.ExecuteNonQuery();
-                }
-            }
-        }
-        private static void InsertTargetTable(IMetadataService metadata, ApplicationObject metaObject)
-        {
-            string script = Build_InsertTable_Command(metaObject);
-
-            using (SqlConnection connection = new SqlConnection(metadata.ConnectionString))
-            {
-                connection.Open();
-
-                using (SqlCommand command = connection.CreateCommand())
-                {
-                    command.CommandType = CommandType.Text;
-                    command.CommandText = script;
-                    command.CommandTimeout = 600; // seconds
-
-                    int rowsAffected = command.ExecuteNonQuery();
-                }
-            }
-        }
-        private static int GetMaxRowNumber(IMetadataService metadata)
-        {
-            int rowCount = 0;
-
-            using (SqlConnection connection = new SqlConnection(metadata.ConnectionString))
-            {
-                connection.Open();
-
-                using (SqlCommand command = connection.CreateCommand())
-                {
-                    command.CommandType = CommandType.Text;
-                    command.CommandText = Build_SelectMaxRowNumber_Command();
-                    command.CommandTimeout = 60; // seconds
-
-                    rowCount = (int)command.ExecuteScalar();
-                }
-            }
-
-            return rowCount;
-        }
-        private static List<T> SelectCatalogItems<T>(IMetadataService metadata, ApplicationObject metaObject) where T : new()
-        {
-            List<T> list = new List<T>();
-
-            using (SqlConnection connection = new SqlConnection(metadata.ConnectionString))
-            {
-                connection.Open();
-
-                using (SqlCommand command = connection.CreateCommand())
-                {
-                    command.CommandType = CommandType.Text;
-                    command.CommandText = Build_SelectTarget_Command(metaObject);
-                    command.CommandTimeout = 60; // seconds
-                    
-                    using (SqlDataReader reader = command.ExecuteReader())
-                    {
-                        while (reader.Read())
-                        {
-                            T item = new T();
-
-                            MapDataToObject(reader, item, metaObject);
-
-                            list.Add(item);
-                        }
-                        reader.Close();
-                    }
-                }
-            }
-
-            return list;
-        }
-        private static void MapDataToObject<T>(SqlDataReader reader, T item, ApplicationObject metaObject)
-        {
-            Type type = typeof(T);
-
-            for (int i = 0; i < metaObject.Properties.Count; i++)
-            {
-                MetadataProperty property = metaObject.Properties[i];
-
-                string propertyType = GetPropertyType(property);
-                string propertyName = GetPropertyName(property);
-
-                if (string.IsNullOrEmpty(propertyName))
-                {
-                    continue;
-                }
-
-                PropertyInfo proxy = type.GetProperty(propertyName);
-                if (proxy == null)
-                {
-                    continue;
-                }
-
-                object value = null;
-                if (propertyType == "Guid")
-                {
-                    value = new Guid(reader.GetString(propertyName));
-                }
-                else if (propertyType == "string")
-                {
-                    value = reader.GetString(propertyName);
-                }
-                else if (propertyType == "decimal")
-                {
-                    value = reader.GetDecimal(propertyName);
-                }
-                else if (propertyType == "bool")
-                {
-                    value = reader.GetBoolean(propertyName);
-                }
-                else if (propertyType == "DateTime")
-                {
-                    value = reader.GetDateTime(propertyName).AddYears(-2000);
-                }
-
-                proxy.SetValue(item, value);
-            }
-        }
-
-        private static string SerializeCatalogItem(Партии item)
-        {
-            JsonWriterOptions options = new JsonWriterOptions
-            {
-                Indented = false,
-                Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
-            };
-
-            MemoryStream stream = new MemoryStream();
-            Utf8JsonWriter writer = new Utf8JsonWriter(stream, options);
-
-            writer.WriteStartObject();
-            writer.WriteString("#type", "jcfg:CatalogObject.Партии");
-
-            writer.WritePropertyName("#value");
-            writer.WriteStartObject();
-
-            Type type = typeof(Партии);
-            foreach (PropertyInfo property in type.GetProperties())
-            {
-                if (property.Name == "Owner")
-                {
-                    SerializePropertyOwner(writer, item, property);
-                    continue;
-                }
-
-                writer.WritePropertyName(property.Name);
-                if (property.PropertyType == typeof(string))
-                {
-                    writer.WriteStringValue((string)property.GetValue(item));
-                }
-                else if (property.PropertyType == typeof(Guid))
-                {
-                    writer.WriteStringValue(((Guid)property.GetValue(item)).ToString());
-                }
-                else if (property.PropertyType == typeof(decimal))
-                {
-                    writer.WriteNumberValue((decimal)property.GetValue(item));
-                }
-                else if (property.PropertyType == typeof(DateTime))
-                {
-                    writer.WriteStringValue(((DateTime)property.GetValue(item)).ToString("yyyy-MM-ddThh:mm:ss"));
-                }
-                else if (property.PropertyType == typeof(bool))
-                {
-                    writer.WriteBooleanValue((bool)property.GetValue(item));
-                }
-                else
-                {
-                    writer.WriteNullValue();
-                }
-            }
-
-            writer.WriteEndObject();
-
-            writer.WriteEndObject();
-            writer.Flush();
-
-            string json = Encoding.UTF8.GetString(stream.ToArray());
-
-            return json;
-        }
-        private static void SerializePropertyOwner(Utf8JsonWriter writer, Партии item, PropertyInfo property)
-        {
-            writer.WritePropertyName("Owner");
-            writer.WriteStartObject();
-
-            writer.WriteString("#type", "jcfg:CatalogRef.Номенклатура");
-
-            writer.WriteString("#value", ((Guid)property.GetValue(item)).ToString());
-
-            writer.WriteEndObject();
-        }
-
-        private static void Export_Справочник_Партии(IMetadataService metadata, InfoBase infoBase)
-        {
-            catalog = infoBase.Catalogs.Values.Where(c => c.Name == "Партии").FirstOrDefault();
-
-            if (catalog == null)
-            {
-                Console.WriteLine("Справочник \"Партии\" не найден."); return;
-            }
-
-            Stopwatch watch = new Stopwatch();
-
-            try
-            {
-                DeleteTargetTable(metadata, catalog);
-                Console.WriteLine("Таблица \"[Справочник_Партии]\" удалена.");
-
-                CreateTargetTable(metadata, catalog);
-                Console.WriteLine("Таблица \"[Справочник_Партии]\" создана.");
-
-                Console.WriteLine("Таблица \"[Справочник_Партии]\" начало копирования: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-                watch.Start();
-                InsertTargetTable(metadata, catalog);
-                watch.Stop();
-                Console.WriteLine("Elapsed (копирование) = " + watch.ElapsedMilliseconds.ToString() + " ms");
-                Console.WriteLine("Таблица \"[Справочник_Партии]\" скопирована: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-            }
-            catch (Exception error)
-            {
-                ShowErrorMessage(error.Message); return;
-            }
-
-            watch.Restart();
-            try
-            {
-                Console.WriteLine("Таблица \"[Справочник_Партии]\" начало выгрузки: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-                ExecuteJob_Справочник_Партии(metadata);
-                Console.WriteLine("Таблица \"[Справочник_Партии]\" выгружена: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-            }
-            catch (Exception error)
-            {
-                ShowErrorMessage(error.Message); return;
-            }
-            watch.Stop();
-            Console.WriteLine("Elapsed = " + watch.ElapsedMilliseconds.ToString() + " ms");
-
-            try
-            {
-                Console.WriteLine("Таблица \"[Справочник_Партии]\" начало удаления: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-                DeleteTargetTable(metadata, catalog);
-                Console.WriteLine("Таблица \"[Справочник_Партии]\" удалена: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-            }
-            catch (Exception error)
-            {
-                ShowErrorMessage(error.Message); return;
-            }
-        }
-        private static void ExecuteJob_Справочник_Партии(IMetadataService metadata)
-        {
-            int MaxRowNumber = GetMaxRowNumber(metadata);
-            int MaxThreads = Environment.ProcessorCount;
-            
-            if (MaxRowNumber == 0)
-            {
-                return;
-            }
-
-            Console.WriteLine($"Max row number = {MaxRowNumber}");
-
-            List<JobInfo> jobs = new List<JobInfo>(MaxThreads);
-            for (int i = 0; i < MaxThreads; i++)
-            {
-                JobInfo job = new JobInfo()
-                {
-                    Channel = CreateChannel()
-                };
-                job.Properties = CreateMessageProperties(job.Channel);
-
-                jobs.Add(job);
-            }
-
-            int end = 0;
-            int start = 1;
-            int nextThread = 0;
-            int step = BatchSize;
-
-            while (MaxRowNumber >= start)
-            {
-                end = start + step - 1;
-
-                BatchInfo batch = new BatchInfo()
-                {
-                    RowNumber1 = start,
-                    RowNumber2 = end
-                };
-
-                jobs[nextThread].Batches.Enqueue(batch);
-
-                nextThread++;
-                if (nextThread == MaxThreads)
-                {
-                    nextThread = 0;
-                }
-
-                start = start + step;
-            }
-
-            int messagesSent = ExecuteJobsInParallel(jobs);
-            Console.WriteLine($"Messages sent = {messagesSent}");
-        }
-        private static int ExecuteJobsInParallel(List<JobInfo> jobs)
-        {
-            int messagesSent = 0;
-
-            using (var SendingCancellation = new CancellationTokenSource())
-            {
-                Task<int>[] tasks = new Task<int>[jobs.Count];
-
-                for (int i = 0; i < jobs.Count; i++)
-                {
-                    tasks[i] = Task.Factory.StartNew(
-                        ExecuteJobsInBackground,
-                        jobs[i],
-                        SendingCancellation.Token,
-                        TaskCreationOptions.LongRunning,
-                        TaskScheduler.Default);
-                }
-
-                Task.WaitAll(tasks, SendingCancellation.Token);
-
-                foreach (Task<int> task in tasks)
-                {
-                    messagesSent += task.Result;
-                }
-            }
-
-            return messagesSent;
-        }
-        private static int ExecuteJobsInBackground(object job)
-        {
-            if (!(job is JobInfo info))
-            {
-                return 0;
-            }
-
-            int counter = 0;
-            while (info.Batches.Count > 0)
-            {
-                try
-                {
-                    int messagesSent = ExecuteJob(info.Channel, info.Properties, info.Batches.Dequeue());
-                    Console.WriteLine($"{messagesSent} messages sent successfully.");
-                    counter += messagesSent;
-                }
-                catch (Exception error)
-                {
-                    ShowErrorMessage(error.Message);
-                    break;
-                }
-            }
-
-            return counter;
-        }
-        private static int ExecuteJob(IModel channel, IBasicProperties properties, BatchInfo batch)
-        {
-            int messagesSent = 0;
-
-            Stopwatch watch = new Stopwatch();
-            watch.Start();
-
-            Console.WriteLine($"Execute job start: {batch.RowNumber1} - {batch.RowNumber2}");
-
-            using (SqlConnection connection = new SqlConnection(metadata.ConnectionString))
-            {
-                connection.Open();
-
-                using (SqlCommand command = connection.CreateCommand())
-                {
-                    command.CommandType = CommandType.Text;
-                    command.CommandText = Build_SelectBatch_Command(catalog);
-                    command.CommandTimeout = 60; // seconds
-                    command.Parameters.AddWithValue("RowNumber1", batch.RowNumber1);
-                    command.Parameters.AddWithValue("RowNumber2", batch.RowNumber2);
-
-                    using (SqlDataReader reader = command.ExecuteReader())
-                    {
-                        while (reader.Read())
-                        {
-                            SendMessage(channel, properties, reader);
-                            
-                            messagesSent++;
-                        }
-                        reader.Close();
-
-                        WaitForConfirms(channel);
-                    }
-                }
-            }
-
-            watch.Stop();
-            Console.WriteLine($"Executing job {batch.RowNumber1} - {batch.RowNumber2} elapsed in {watch.ElapsedMilliseconds} ms");
-
-            return messagesSent;
-        }
-        private static void SendMessage(IModel channel, IBasicProperties properties, SqlDataReader reader)
-        {
-            byte[] messageBytes = Serialize_Справочник_Партии(reader);
-
-            properties.MessageId = Guid.NewGuid().ToString();
-            
-            channel.BasicPublish(TopicExchangeName, RoutingKey, properties, messageBytes);
-        }
-        private static void WaitForConfirms(IModel channel)
-        {
-            try
-            {
-                bool confirmed = channel.WaitForConfirms(TimeSpan.FromSeconds(10), out bool timedout);
-                if (!confirmed)
-                {
-                    //if (timedout)
-                    //{
-                    //    SendingExceptions.Enqueue(new OperationCanceledException(PUBLISHER_CONFIRMATION_TIMEOUT_MESSAGE));
-                    //}
-                    //else
-                    //{
-                    //    SendingExceptions.Enqueue(new OperationCanceledException(PUBLISHER_CONFIRMATION_ERROR_MESSAGE));
-                    //}
-                    //SendingCancellation.Cancel();
-                }
-            }
-            catch (OperationInterruptedException rabbitError)
-            {
-                //SendingExceptions.Enqueue(rabbitError);
-                //if (string.IsNullOrWhiteSpace(rabbitError.Message) || !rabbitError.Message.Contains("NOT_FOUND"))
-                //{
-                //    SendingCancellation.Cancel();
-                //}
-            }
-            catch (Exception error)
-            {
-                //SendingExceptions.Enqueue(error);
-                //SendingCancellation.Cancel();
-            }
-        }
-
-        private static byte[] Serialize_Справочник_Партии(SqlDataReader reader)
-        {
-            JsonWriterOptions options = new JsonWriterOptions
-            {
-                Indented = false,
-                Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
-            };
-
-            //byte[] buffer = ArrayPool<byte>.Shared.Rent(4096);
-            //ArrayPool<byte>.Shared.Return(buffer);
-
-            MemoryStream stream = new MemoryStream(2048);
-            Utf8JsonWriter writer = new Utf8JsonWriter(stream, options);
-
-            writer.WriteStartObject();
-            writer.WriteString("#type", "jcfg:CatalogObject.Партии");
-
-            writer.WritePropertyName("#value");
-            writer.WriteStartObject();
-
-            //int ownerOrdinal = reader.GetOrdinal("Owner");
-            //List<string> propertyNames = new List<string>(reader.FieldCount);
-            //for (int i = 0; i < reader.FieldCount; i++)
-            //{
-            //    propertyNames.Add(reader.GetName(i));
-            //}
-
-            for (int i = 0; i < reader.FieldCount; i++)
-            {
-                if (reader.GetName(i) == "Owner")
-                {
-                    writer.WritePropertyName("Owner");
-                    writer.WriteStartObject();
-                    writer.WriteString("#type", "jcfg:CatalogRef.Номенклатура");
-                    writer.WriteString("#value", reader.GetString(i));
-                    writer.WriteEndObject();
-                }
-                else
-                {
-                    writer.WritePropertyName(reader.GetName(i));
-
-                    Type type = reader.GetFieldType(i);
-
-                    if (type == typeof(decimal))
-                    {
-                        writer.WriteNumberValue(reader.GetDecimal(i));
-                    }
-                    else if (type == typeof(bool))
-                    {
-                        writer.WriteBooleanValue(reader.GetBoolean(i));
-                    }
-                    else if (type == typeof(DateTime))
-                    {
-                        writer.WriteStringValue(reader.GetDateTime(i).ToString("yyyy-MM-ddThh:mm:ss"));
-                    }
-                    else if (type == typeof(string))
-                    {
-                        writer.WriteStringValue(reader.GetString(i));
-                    }
-                    else
-                    {
-                        writer.WriteNullValue();
-                    }
-                }
-            }
-            writer.WriteEndObject();
-            writer.WriteEndObject();
-            writer.Flush();
-
-            return stream.ToArray();
-        }
-
-        private static void GetTableNames(InfoBase infoBase)
-        {
-            ApplicationObject catalog = infoBase.Catalogs.Values.Where(c => c.Name == "Партии").FirstOrDefault();
-            if (catalog == null)
-            {
-                Console.WriteLine("Справочник \"Партии\" не найден.");
-            }
-            else
-            {
-                Console.WriteLine($"Справочник \"Партии\": {catalog.TableName}");
-            }
-
-            ApplicationObject document = infoBase.Documents.Values.Where(c => c.Name == "Чеки").FirstOrDefault();
-            if (document == null)
-            {
-                Console.WriteLine("Документ \"Чеки\" не найден.");
-            }
-            else
-            {
-                Console.WriteLine($"Документ \"Чеки\": {document.TableName}");
-                foreach (TablePart table in document.TableParts)
-                {
-                    Console.WriteLine($"- Табличная часть \"{table.Name}\": {table.TableName}");
-                }
-            }
         }
     }
 }

@@ -1,5 +1,8 @@
 ﻿using RabbitMQ.Client;
 using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
+using System.Threading;
 
 namespace DaJet.Export
 {
@@ -8,5 +11,9 @@ namespace DaJet.Export
         public IModel Channel { get; set; }
         public IBasicProperties Properties { get; set; }
         public Queue<BatchInfo> Batches { get; set; } = new Queue<BatchInfo>();
+        public MemoryStream Stream { get; set; }
+        public Utf8JsonWriter Writer { get; set; }
+        public ulong DeliveryTag { get; set; }
+        public AutoResetEvent ConfirmEvent { get; set; } = new AutoResetEvent(false);
     }
 }
