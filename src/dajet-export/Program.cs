@@ -1,25 +1,9 @@
-﻿using DaJet.Export.Справочник;
-using DaJet.Metadata;
+﻿using DaJet.Metadata;
 using DaJet.Metadata.Model;
-using Microsoft.Data.SqlClient;
-using Microsoft.IO;
-using RabbitMQ.Client;
-using RabbitMQ.Client.Exceptions;
 using System;
-using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Invocation;
-using System.Data;
 using System.Diagnostics;
-using System.IO;
-using System.Linq;
-using System.Reflection;
-using System.Text;
-using System.Text.Encodings.Web;
-using System.Text.Json;
-using System.Text.Unicode;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace DaJet.Export
 {
@@ -32,19 +16,14 @@ namespace DaJet.Export
 
         private static IMetadataService metadata = new MetadataService();
         
-        private static int RowsLimit = 0;
         private static int BatchSize = 1000;
-        private static int WaitForConfirmsTimeout = 30; // seconds
 
-        private const string TopicExchangeName = "accord.dajet.exchange"; // "dajet-exchange";
-        private const string RoutingKey = "Справочник.Партии"; // "РегистрСведений.Тестовый";
-
-        // MultipleActiveResultSets=True
+        private const string TopicExchangeName = "dajet-exchange"; // "accord.dajet.exchange";
+        private const string RoutingKey = "РегистрСведений.Тестовый"; // "Справочник.Партии";
 
         public static int Main(string[] args)
         {
-            //args = new string[] { "--ms", "ZHICHKIN", "--db", "cerberus" };
-            //args = new string[] { "--ms", "ZHICHKIN", "--db", "cerberus", "--batch-size", "33000" };
+            args = new string[] { "--ms", "ZHICHKIN", "--db", "cerberus" };
 
             RootCommand command = new RootCommand()
             {
@@ -52,11 +31,10 @@ namespace DaJet.Export
                 new Option<string>("--db", "Database name"),
                 new Option<string>("--u", "User name (Windows authentication is used if not defined)"),
                 new Option<string>("--p", "User password if SQL Server authentication is used"),
-                new Option<int>("--batch-size", "Number of rows to export in one batch (default is 1000)"),
-                new Option<int>("--rows-limit", "Total number of rows to export from database (default is all rows)")
+                new Option<int>("--batch-size", "Number of rows to export in one batch (default is 1000)")
             };
             command.Description = "DaJet Agent Export Tool";
-            command.Handler = CommandHandler.Create<string, string, string, string, int, int>(ExecuteCommand);
+            command.Handler = CommandHandler.Create<string, string, string, string, int>(ExecuteCommand);
             return command.Invoke(args);
         }
         private static void ShowErrorMessage(string errorText)
@@ -84,7 +62,7 @@ namespace DaJet.Export
                 Console.ForegroundColor = ConsoleColor.White;
             }
         }
-        private static void ExecuteCommand(string ms, string db, string u, string p, int batchSize, int rowsLimit)
+        private static void ExecuteCommand(string ms, string db, string u, string p, int batchSize)
         {
             if (string.IsNullOrWhiteSpace(ms))
             {
@@ -97,10 +75,6 @@ namespace DaJet.Export
             if (batchSize > 0)
             {
                 BatchSize = batchSize;
-            }
-            if (rowsLimit > 0)
-            {
-                RowsLimit = rowsLimit;
             }
 
             metadata

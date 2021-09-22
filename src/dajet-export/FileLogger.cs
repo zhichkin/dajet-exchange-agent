@@ -22,7 +22,7 @@ namespace DaJet.Export
 
             return _filePath;
         }
-        internal static int LogSize { get; set; } = 102400;
+        internal static int LogSize { get; set; } = 0;
         internal static void Log(string text)
         {
             lock (_syncLog)
@@ -37,7 +37,7 @@ namespace DaJet.Export
 
             try
             {
-                if (file.Exists && file.Length > LogSize)
+                if (LogSize > 0 && file.Exists && file.Length > LogSize)
                 {
                     file.Delete();
                 }

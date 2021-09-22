@@ -8,7 +8,6 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
-using System.IO;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -584,7 +583,7 @@ namespace DaJet.Export
                     batch.RowNumber2 = maxRowNumber;
                 }
 
-                LIST_OF_JOBS[nextThread].Batches.Enqueue(batch);
+                LIST_OF_JOBS[nextThread].Batches.Add(batch);
 
                 nextThread++;
                 if (nextThread == maxThreads)
@@ -632,39 +631,51 @@ namespace DaJet.Export
             }
 
             int counter = 0;
-            bool confirmed;
-            BatchInfo batch;
 
-            while (job.Batches.Count > 0)
+            for (int i = 0; i < job.Batches.Count; i++)
             {
                 try
                 {
-                    batch = job.Batches.Dequeue();
+                    BatchInfo batch = job.Batches[i];
 
                     FileLogger.Log($"Batch {batch.RowNumber1} - {batch.RowNumber2}: export start.");
 
-                    counter += ExportData(job, batch);
-
-                    while (confirmed = job.ConfirmEvent.WaitOne(TimeSpan.FromMinutes(3)))
+                    batch.MessagesSent = ExportData(job, batch);
+                    if (batch.MessagesSent == 0)
                     {
-                        if (job.Channel.NextPublishSeqNo == job.DeliveryTag + 1)
-                        {
-                            break;
-                        }
+                        continue;
+                    }
+                    counter += batch.MessagesSent;
+
+                    if (batch.MessagesSent == 1)
+                    {
+                        WaitForConfirms(job.Channel);
+                        continue;
                     }
 
-                    FileLogger.Log($"Batch {batch.RowNumber1} - {batch.RowNumber2}: NextPublishSeqNo = {job.Channel.NextPublishSeqNo}");
-                    FileLogger.Log($"Batch {batch.RowNumber1} - {batch.RowNumber2}: DeliveryTag = {job.DeliveryTag}");
+                    // TODO: Handle the situation when messages are confirmed immediately.
 
-                    if (confirmed)
+                    // Wait for publisher confirm signal from BasicAcksHandler
+                    bool confirmed = job.ConfirmEvent.WaitOne(TimeSpan.FromMinutes(5));
+
+                    if (batch.IsNacked)
                     {
-                        FileLogger.Log($"Batch {batch.RowNumber1} - {batch.RowNumber2}: export confirmed!");
-                        ReportSuccess?.Invoke(batch);
+                        FileLogger.Log($"Batch {batch.RowNumber1} - {batch.RowNumber2}: is Nacked! Retry batch.");
+                        ReportFailure?.Invoke(batch);
+                        // TODO: Retry batch.
                     }
                     else
                     {
-                        FileLogger.Log($"Batch {batch.RowNumber1} - {batch.RowNumber2}: export is not confirmed!");
-                        ReportFailure?.Invoke(batch);
+                        if (confirmed)
+                        {
+                            FileLogger.Log($"Batch {batch.RowNumber1} - {batch.RowNumber2}: export confirmed!");
+                            ReportSuccess?.Invoke(batch);
+                        }
+                        else
+                        {
+                            FileLogger.Log($"Batch {batch.RowNumber1} - {batch.RowNumber2}: export is not confirmed!");
+                            ReportFailure?.Invoke(batch);
+                        }
                     }
                 }
                 catch (Exception error)
@@ -672,12 +683,12 @@ namespace DaJet.Export
                     FileLogger.Log(error.Message);
                     throw error;
                 }
-
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
+                finally
+                {
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                }
             }
-
-            //WaitForConfirms(job.Channel);
 
             return counter;
         }
@@ -723,7 +734,6 @@ namespace DaJet.Export
                 job.Stream = null;
                 
                 FileLogger.Log($"Channel #{channelNumber}: next publish sequence number = {job.Channel.NextPublishSeqNo}");
-                FileLogger.Log($"Channel #{channelNumber}: delivery tag = {job.DeliveryTag}");
 
                 job.Channel.Dispose();
                 job.Channel = null;
@@ -775,7 +785,7 @@ namespace DaJet.Export
         {
             try
             {
-                bool confirmed = channel.WaitForConfirms(TimeSpan.FromSeconds(30), out bool timedout);
+                bool confirmed = channel.WaitForConfirms(TimeSpan.FromSeconds(10), out bool timedout);
                 if (!confirmed)
                 {
                     if (timedout)
@@ -806,17 +816,17 @@ namespace DaJet.Export
                 
         private void BasicAcksHandler(object sender, BasicAckEventArgs args)
         {
-            IModel channel = sender as IModel;
-            if (channel == null) return;
+            if (!(sender is IModel channel)) return;
 
             foreach (JobInfo job in LIST_OF_JOBS)
             {
                 if (job.Channel.ChannelNumber == channel.ChannelNumber)
                 {
-                    job.DeliveryTag = args.DeliveryTag;
-                    
-                    job.ConfirmEvent.Set();
-                    
+                    if (channel.NextPublishSeqNo == args.DeliveryTag + 1)
+                    {
+                        // Send signal to ExecuteJobInBackground procedure
+                        job.ConfirmEvent.Set();
+                    }
                     break;
                 }
             }
@@ -825,7 +835,29 @@ namespace DaJet.Export
         {
             if (!(sender is IModel channel)) return;
 
-            FileLogger.Log($"Channel #{channel.ChannelNumber}: BasicNacksHandler = {args.DeliveryTag}, multiple = {args.Multiple}");
+            foreach (JobInfo job in LIST_OF_JOBS)
+            {
+                if (job.Channel.ChannelNumber == channel.ChannelNumber)
+                {
+                    int deliveryTag = (int)args.DeliveryTag;
+
+                    FileLogger.Log($"Channel #{channel.ChannelNumber}: Nack delivery tag = {args.DeliveryTag}, multiple = {args.Multiple}");
+
+                    int messagesSent = 0;
+
+                    foreach (BatchInfo batch in job.Batches)
+                    {
+                        messagesSent += batch.MessagesSent;
+
+                        if (deliveryTag <= messagesSent)
+                        {
+                            batch.IsNacked = true;
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
         }
 
         private static void MapDataToJson(SqlDataReader reader, Utf8JsonWriter writer)

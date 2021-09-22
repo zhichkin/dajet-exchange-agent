@@ -8,12 +8,11 @@ namespace DaJet.Export
 {
     public sealed class JobInfo
     {
+        public List<BatchInfo> Batches { get; set; } = new List<BatchInfo>();
         public IModel Channel { get; set; }
         public IBasicProperties Properties { get; set; }
-        public Queue<BatchInfo> Batches { get; set; } = new Queue<BatchInfo>();
         public MemoryStream Stream { get; set; }
         public Utf8JsonWriter Writer { get; set; }
-        public ulong DeliveryTag { get; set; }
         public AutoResetEvent ConfirmEvent { get; set; } = new AutoResetEvent(false);
     }
 }
