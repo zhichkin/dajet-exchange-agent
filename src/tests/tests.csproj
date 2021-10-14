@@ -7,16 +7,19 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="16.8.3" />
-    <PackageReference Include="MSTest.TestAdapter" Version="2.1.2" />
-    <PackageReference Include="MSTest.TestFramework" Version="2.1.2" />
-    <PackageReference Include="coverlet.collector" Version="3.0.2">
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="16.11.0" />
+    <PackageReference Include="MSTest.TestAdapter" Version="2.2.7" />
+    <PackageReference Include="MSTest.TestFramework" Version="2.2.7" />
+    <PackageReference Include="coverlet.collector" Version="3.1.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="System.Net.Http.Json" Version="5.0.0" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\accord-graphql-client\accord-graphql-client.csproj" />
+    <ProjectReference Include="..\dajet-database-messaging\dajet-database-messaging.csproj" />
     <ProjectReference Include="..\dajet-rabbitmq-producer\dajet-rabbitmq-producer.csproj" />
   </ItemGroup>
 

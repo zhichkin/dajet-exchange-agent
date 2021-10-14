@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>netcoreapp3.1</TargetFramework>
+    <RootNamespace>DaJet.Setup</RootNamespace>
+    <PackageId>DaJet.Setup.Utility</PackageId>
+    <Authors>Zhichkin</Authors>
+    <Description>Utility to setup the database table-queues and auxiliary objects.
+The utility provides the DaJet Exchange Agent setup support.
+Microsoft SQL Server and PostgreSQL are supported.</Description>
+    <Copyright>Zhichkin © 2021</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/zhichkin/dajet-exchange-agent</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/zhichkin/dajet-exchange-agent</RepositoryUrl>
+    <PackageReleaseNotes>The utility creates the database SEQUENCE objects to ensure sequential publishing of messages guarantee.
+The SEQUENCE objects are used by the table-queues triggers to generate message sequence numbers.
+The triggers are also created by the utility.</PackageReleaseNotes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DaJet.Metadata" Version="3.1.6" />
+    <PackageReference Include="System.CommandLine" Version="2.0.0-beta1.21308.1" />
+  </ItemGroup>
+
+</Project>

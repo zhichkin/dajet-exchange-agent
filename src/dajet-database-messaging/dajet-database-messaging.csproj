@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netcoreapp3.1</TargetFramework>
+    <RootNamespace>DaJet.Database.Messaging</RootNamespace>
+    <AssemblyName>DaJet.Database.Messaging</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DaJet.Metadata" Version="3.1.6" />
+  </ItemGroup>
+
+</Project>

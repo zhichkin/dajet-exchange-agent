@@ -7,6 +7,8 @@ using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace tests
 {
@@ -34,6 +36,19 @@ namespace tests
             };
             Settings = Options.Create(settings);
         }
+        private IConnection GetRmqConnection(string hostName, string virtualHost, int portNumber, string userName, string password)
+        {
+            IConnectionFactory factory = new ConnectionFactory()
+            {
+                HostName = hostName,
+                VirtualHost = virtualHost,
+                UserName = userName,
+                Password = password,
+                Port = portNumber
+            };
+            return factory.CreateConnection();
+        }
+
 
         [TestMethod] public void TestCreateQueue()
         {
@@ -233,6 +248,76 @@ namespace tests
             Console.WriteLine(response.Content.ReadAsStringAsync().Result);
 
             // https://rawcdn.githack.com/rabbitmq/rabbitmq-server/v3.8.19/deps/rabbitmq_management/priv/www/api/index.html
+        }
+
+        [TestMethod] public void GetQueueInfo()
+        {
+            QueueDeclareOk info;
+
+            List<string> queueList = new List<string>()
+            {
+                "accord.dajet.ref.storage_place",  // Справочник.МестаХранения
+                "accord-test.dajet.ref.storage_place",
+                "accord.dajet.ref.storage_address", // Справочник.АдресХранения
+                "accord-test.dajet.ref.storage_address",
+                "accord.dajet.stream.storage_stock", // РегистрСведений.ТоварыНаСкладах
+                "accord-test.dajet.stream.storage_stock"
+            };
+
+            using (IConnection connection = GetRmqConnection("", "", 5672, "", ""))
+            {
+                using (IModel channel = connection.CreateModel())
+                {
+                    foreach(string queueName in queueList)
+                    {
+                        try
+                        {
+                            info = channel.QueueDeclarePassive(queueName);
+                            Console.WriteLine($"Queue \"{info.QueueName}\" = {info.MessageCount} msg");
+                        }
+                        catch
+                        {
+                            Console.WriteLine($"Queue \"{queueName}\" does not exist");
+                        }
+                    }
+                }
+            }
+        }
+
+        [TestMethod] public void TestConnection()
+        {
+            int counter = 0;
+            string ExchangeName = "accord.dajet.exchange";
+            string RoutingKey = "Test.MessageNo1";
+
+            using (IConnection connection = GetRmqConnection("", "", 5673, "", ""))
+            {
+                using (IModel channel = connection.CreateModel())
+                {
+                    channel.ConfirmSelect();
+
+                    IBasicProperties properties = channel.CreateBasicProperties();
+                    properties.AppId = "test";
+                    properties.DeliveryMode = 2;
+                    properties.Type = "Test.MessageNo1";
+                    properties.ContentEncoding = "UTF-8";
+                    properties.ContentType = "application/json";
+
+                    byte[] messageBody = Encoding.UTF8.GetBytes("{ \"test\" : 123 }");
+
+                    for (int i = 0; i < 500; i++)
+                    {
+                        channel.BasicPublish(ExchangeName, RoutingKey, properties, messageBody);
+                        counter++;
+                    }
+
+                    bool confirmed = channel.WaitForConfirms();
+
+                    Console.WriteLine($"{counter} messages sent successfully");
+
+                    Thread.Sleep(TimeSpan.FromSeconds(10));
+                }
+            }
         }
     }
 }
