@@ -12,7 +12,7 @@ namespace DaJet.Database.Messaging
         /// <summary>
         /// "НомерСообщения" Порядковый номер сообщения (генерируется средствами СУБД) - numeric(19,0)
         /// </summary>
-        [NotMapped] public long MessageNumber { get; set; } = 0L;
+        [Column("НомерСообщения")] [NotMapped] public long MessageNumber { get; set; } = 0L;
         /// <summary>
         /// "Отправитель" Код или UUID отправителя сообщения - nvarchar(36)
         /// </summary>

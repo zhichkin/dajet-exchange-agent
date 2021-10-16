@@ -1,6 +1,8 @@
-﻿using DaJet.Metadata;
+﻿using DaJet.Database.Messaging;
+using DaJet.Metadata;
 using DaJet.Metadata.Model;
 using System;
+using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Linq;
@@ -14,7 +16,10 @@ namespace DaJet.Setup
 
         private const string SERVER_IS_NOT_DEFINED_ERROR = "Server address is not defined.";
         private const string DATABASE_IS_NOT_DEFINED_ERROR = "Database name is not defined.";
-        
+
+        private static readonly IDatabaseConfigurator DbConfigurator = new DatabaseConfigurator();
+        private static readonly IDatabaseInterfaceValidator DbValidator = new DatabaseInterfaceValidator();
+
         public static int Main(string[] args)
         {
             args = new string[] { "--ms", "zhichkin", "--db", "cerberus", "--verbose" };
@@ -59,20 +64,26 @@ namespace DaJet.Setup
 
             IMetadataService metadataService = ConfigureMetadataService(ms, pg, db, usr, pwd);
 
+            DbConfigurator
+                .UseDatabaseProvider(metadataService.DatabaseProvider)
+                .UseConnectionString(metadataService.ConnectionString);
+
             if (TryOpenInfoBase(metadataService, out InfoBase infoBase, out string errorMessage))
             {
                 ShowInfoBaseInfo(infoBase);
-                SetupDatabase(infoBase, metadataService);
+                SetupDatabase(infoBase);
             }
             else
             {
                 ShowErrorMessage(errorMessage);
             }
 
-            if (verbose)
-            {
-                //Console.WriteLine("verbose mode");
-            }
+            //if (verbose)
+            //{
+            //    Console.WriteLine();
+            //    Console.WriteLine("Press any key to exit ...");
+            //    Console.ReadKey(false);
+            //}
         }
         private static IMetadataService ConfigureMetadataService(string ms, string pg, string db, string usr, string pwd)
         {
@@ -121,15 +132,13 @@ namespace DaJet.Setup
             Console.WriteLine("ConfigVersion = " + config.ConfigVersion);
             Console.WriteLine();
         }
-        private static void SetupDatabase(InfoBase infoBase, IMetadataService metadataService)
+        private static void SetupDatabase(InfoBase infoBase)
         {
-            SetupIncomingQueue(infoBase, metadataService);
-            SetupOutgoingQueue(infoBase, metadataService);
+            SetupIncomingQueue(infoBase);
+            //SetupOutgoingQueue(infoBase);
         }
         
-        
-        
-        private static void SetupIncomingQueue(InfoBase infoBase, IMetadataService metadataService)
+        private static void SetupIncomingQueue(InfoBase infoBase)
         {
             ApplicationObject metaObject = infoBase
                 .InformationRegisters.Values
@@ -142,19 +151,34 @@ namespace DaJet.Setup
                 return;
             }
 
-            if (IncomingQueueInterfaceIsValid(metaObject))
+            if (!DbValidator.IncomingQueueInterfaceIsValid(metaObject, out List<string> errors))
             {
-                ShowSuccessMessage($"РегистрСведений.{INCOMING_QUEUE_NAME}");
+                ShowErrorMessage($"РегистрСведений.{INCOMING_QUEUE_NAME}");
+                foreach (string error in errors)
+                {
+                    ShowErrorMessage(error);
+                }
+            }
+
+            if (errors.Count > 0)
+            {
+                return;
+            }
+
+            try
+            {
+                DbConfigurator.ConfigureIncomingQueue(metaObject);
+                ShowSuccessMessage($"РегистрСведений.{INCOMING_QUEUE_NAME} configured successfully");
+            }
+            catch (Exception error)
+            {
+                ShowErrorMessage($"РегистрСведений.{INCOMING_QUEUE_NAME} configuration failed");
+                Console.WriteLine();
+                ShowErrorMessage(ExceptionHelper.GetErrorText(error));
             }
         }
-        private static bool IncomingQueueInterfaceIsValid(ApplicationObject queue)
-        {
-            return true;
-        }
 
-
-
-        private static void SetupOutgoingQueue(InfoBase infoBase, IMetadataService metadataService)
+        private static void SetupOutgoingQueue(InfoBase infoBase)
         {
             ApplicationObject metaObject = infoBase
                 .InformationRegisters.Values
@@ -167,10 +191,17 @@ namespace DaJet.Setup
                 return;
             }
 
-            if (IncomingQueueInterfaceIsValid(metaObject))
+            if (!DbValidator.OutgoingQueueInterfaceIsValid(metaObject, out List<string> errors))
             {
-                ShowSuccessMessage($"РегистрСведений.{OUTGOING_QUEUE_NAME}");
+                ShowErrorMessage($"РегистрСведений.{OUTGOING_QUEUE_NAME}");
+                foreach (string error in errors)
+                {
+                    ShowErrorMessage(error);
+                }
+                return;
             }
+            
+            ShowSuccessMessage($"РегистрСведений.{OUTGOING_QUEUE_NAME}");
         }
     }
 }

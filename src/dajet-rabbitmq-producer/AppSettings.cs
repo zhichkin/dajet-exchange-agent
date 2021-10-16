@@ -8,5 +8,7 @@
         public int ReceivingMessagesPeriodicity { get; set; } = 60; // 1 minute
         public bool UseNotifications { get; set; } = false; // SQL Server Service Broker notifications
         public int WaitForNotificationTimeout { get; set; } = 180; // 3 minutes
+        public bool UseGraphQL { get; set; } = false;
+        public string AppCatalog { get; set; } = string.Empty;
     }
 }

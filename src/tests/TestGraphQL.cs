@@ -1,6 +1,7 @@
 ﻿using Accord.GraphQL;
 using Accord.GraphQL.Model;
 using DaJet.Database.Messaging;
+using DaJet.FileLogger;
 using DaJet.Metadata;
 using DaJet.Metadata.Model;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -22,7 +23,7 @@ namespace tests
         private const string PASSWORD = "";
         private const string API_BASE_URI = "";
 
-        private const string CONNECTION_STRING = "Data Source=zhichkin;Initial Catalog=my_exchange;Integrated Security=True";
+        private const string CONNECTION_STRING = "Data Source=zhichkin;Initial Catalog=cerberus;Integrated Security=True";
 
         public TestGraphQL()
         {
@@ -34,8 +35,8 @@ namespace tests
         [TestMethod] public async Task TestProductSearch()
         {
             int pageNum = 1;
-            int perPage = 10;
-            DateTime dateUtc = new DateTime(2021, 1, 1);
+            int perPage = 30;
+            DateTime dateUtc = new DateTime(2021, 10, 1);
             ProductSearch result = await client.GetUpdatedProducts(dateUtc, pageNum, perPage);
 
             if (result == null)
@@ -56,24 +57,9 @@ namespace tests
             {
                 counter++;
                 Console.WriteLine($"{counter}. Product {product.id} ({product.code})");
-                Console.WriteLine($"{product.name}");
+                Console.WriteLine($"{product.name} is MDLP = {product.isMdlp}");
                 Console.WriteLine($"Last updated: {product.updatedAt:yyyy-MM-dd HH:mm:ss}");
                 Console.WriteLine();
-            }
-
-            if (result.pageInfo.total > result.pageInfo.perPage)
-            {
-                pageNum++;
-                result = await client.GetUpdatedProducts(dateUtc, pageNum, perPage);
-
-                foreach (Product product in result.items)
-                {
-                    counter++;
-                    Console.WriteLine($"{counter}. Product {product.id} ({product.code})");
-                    Console.WriteLine($"{product.name}");
-                    Console.WriteLine($"Last updated: {product.updatedAt:yyyy-MM-dd HH:mm:ss}");
-                    Console.WriteLine();
-                }
             }
         }
 
@@ -155,6 +141,25 @@ namespace tests
 
             Console.WriteLine();
             Console.WriteLine("The end =)");
+        }
+
+        [TestMethod] public void TestSqlLiteSettingsProvider()
+        {
+            SqlLiteSettingsProvider settings = new SqlLiteSettingsProvider();
+            settings.UseCatalogPath(FileLogger.CatalogPath);
+            
+            DateTime value = settings.GetSetting<DateTime>("LastUpdated");
+
+            Console.WriteLine("Current value = " + value.ToString("yyyy-MM-dd HH:mm:ss"));
+
+            //DateTime newValue = DateTime.UtcNow;
+            //newValue = new DateTime(newValue.Year, newValue.Month, newValue.Day, newValue.Hour, newValue.Minute, newValue.Second);
+            //settings.SetSetting("LastUpdated", newValue);
+            //DateTime getValue = settings.GetSetting<DateTime>("LastUpdated");
+
+            //Console.WriteLine($"New value = {newValue}");
+            //Console.WriteLine($"Get value = {getValue}");
+            //Console.WriteLine($"New value == Get value >> {newValue == getValue}");
         }
     }
 }

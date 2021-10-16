@@ -1,6 +1,8 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using Accord.GraphQL;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using System.IO;
 using System.Reflection;
 
@@ -8,41 +10,76 @@ namespace DaJet.RabbitMQ.Producer
 {
     public static class Program
     {
-        static void Main(string[] args)
+        private static AppSettings AppSettings { get; set; } = new AppSettings();
+        public static void Main(string[] args)
         {
+            InitializeAppSettings();
+
+            FileLogger.LogSize = AppSettings.LogSize;
+
+            FileLogger.Log("Hosting service is started.");
             CreateHostBuilder(args).Build().Run();
+            FileLogger.Log("Hosting service is stopped.");
+        }
+        private static void InitializeAppSettings()
+        {
+            Assembly asm = Assembly.GetExecutingAssembly();
+            string catalogPath = Path.GetDirectoryName(asm.Location);
+
+            IConfigurationRoot config = new ConfigurationBuilder()
+                .SetBasePath(catalogPath)
+                .AddJsonFile("appsettings.json", optional: false)
+                .Build();
+
+            config.Bind(AppSettings);
+
+            if (string.IsNullOrWhiteSpace(AppSettings.AppCatalog))
+            {
+                AppSettings.AppCatalog = catalogPath;
+            }
         }
         public static IHostBuilder CreateHostBuilder(string[] args)
         {
             return Host.CreateDefaultBuilder(args)
                 .UseWindowsService()
-                .ConfigureServices((context, services) =>
+                .ConfigureAppConfiguration(config =>
                 {
-                    services.AddOptions();
-                    ConfigureAppSettings(services);
-                    services.AddSingleton<IMessageProducer, MessageProducer>();
-                    services.AddSingleton<IMessageConsumer, MessageConsumer>();
-                    services.AddHostedService<Worker>();
-                });
+                    config.Sources.Clear();
+                    config
+                        .SetBasePath(AppSettings.AppCatalog)
+                        .AddJsonFile("appsettings.json", optional: false);
+                })
+                .ConfigureServices(ConfigureServices);
         }
-        private static void ConfigureAppSettings(IServiceCollection services)
+        private static void ConfigureServices(HostBuilderContext context, IServiceCollection services)
         {
-            Assembly asm = Assembly.GetExecutingAssembly();
-            string appCatalogPath = Path.GetDirectoryName(asm.Location);
+            services
+                .AddOptions()
+                .AddSingleton(Options.Create(AppSettings))
+                .Configure<HostOptions>(context.Configuration.GetSection(nameof(HostOptions)))
+                .Configure<DaJetExchangeQueue>(context.Configuration.GetSection("DaJetExchangeQueue"))
+                .Configure<MessageConsumerSettings>(context.Configuration.GetSection("ConsumerSettings"))
+                .Configure<MessageProducerSettings>(context.Configuration.GetSection("ProducerSettings"));
 
-            AppSettings settings = new AppSettings();
-            IConfigurationRoot config = new ConfigurationBuilder()
-                .SetBasePath(appCatalogPath)
-                .AddJsonFile("appsettings.json", optional: false)
-                .Build();
-            config.Bind(settings);
+            services.AddSingleton<IMessageProducer, MessageProducer>();
+            services.AddSingleton<IMessageConsumer, MessageConsumer>();
+            services.AddHostedService<Worker>();
 
-            FileLogger.LogSize = settings.LogSize;
-
-            services.Configure<AppSettings>(config);
-            services.Configure<DaJetExchangeQueue>(config.GetSection("DaJetExchangeQueue"));
-            services.Configure<MessageConsumerSettings>(config.GetSection("ConsumerSettings"));
-            services.Configure<MessageProducerSettings>(config.GetSection("ProducerSettings"));
+            if (AppSettings.UseGraphQL)
+            {
+                services
+                    .Configure<GraphQLSettings>(context.Configuration.GetSection("GraphQL"))
+                    .AddHostedService<AccordGraphQLService>();
+            }
         }
+
+        //private static void ConfigureProducerSettings(IServiceCollection services)
+        //{
+        //    IConfigurationRoot config = new ConfigurationBuilder()
+        //        .SetBasePath(AppSettings.AppCatalog)
+        //        .AddJsonFile("producer-settings.json", optional: false)
+        //        .Build();
+        //    services.Configure<MessageProducerSettings>(config);
+        //}
     }
 }

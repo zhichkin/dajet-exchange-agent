@@ -19,8 +19,11 @@ The triggers are also created by the utility.</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="DaJet.Metadata" Version="3.1.6" />
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta1.21308.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\dajet-database-messaging\dajet-database-messaging.csproj" />
   </ItemGroup>
 
 </Project>

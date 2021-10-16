@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netcoreapp3.1</TargetFramework>
+    <RootNamespace>DaJet.FileLogger</RootNamespace>
+    <AssemblyName>DaJet.FileLogger</AssemblyName>
+  </PropertyGroup>
+
+</Project>
