@@ -1,5 +1,8 @@
 # DaJet Exchange Agent
 
+DaJet Exchange Agent is a Windows service for integrating 1C: Enterprise 8 with RabbitMQ at the database level.
+In other words, to put it simply: DaJet is a database adapter between 1C tables and RabbitMQ queues.
+
 [Требуется установка .NET Core 3.1](https://dotnet.microsoft.com/download)
 
 Агент DaJet Exchange устанавливается в узле обмена данными
