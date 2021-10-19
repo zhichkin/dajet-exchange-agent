@@ -22,7 +22,7 @@ namespace DaJet.Setup
 
         public static int Main(string[] args)
         {
-            args = new string[] { "--ms", "zhichkin", "--db", "cerberus", "--verbose" };
+            //args = new string[] { "--ms", "zhichkin", "--db", "cerberus", "--verbose" };
             //args = new string[] { "--pg", "127.0.0.1", "--db", "test_node_2", "--usr", "postgres", "--pwd", "postgres" };
 
             RootCommand command = new RootCommand()

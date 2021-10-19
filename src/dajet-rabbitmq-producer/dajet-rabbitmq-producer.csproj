@@ -15,7 +15,7 @@ In other words, DaJet is a database adapter between 1C tables and RabbitMQ queue
     <Copyright>Zhichkin © 2021</Copyright>
     <PackageProjectUrl>https://github.com/zhichkin/dajet-exchange-agent</PackageProjectUrl>
     <RepositoryUrl>https://github.com/zhichkin/dajet-exchange-agent</RepositoryUrl>
-    <AssemblyName>DaJet.Exchange.Agent</AssemblyName>
+    <AssemblyName>dajet-rabbitmq-producer</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>

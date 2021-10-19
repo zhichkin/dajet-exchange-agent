@@ -36,8 +36,9 @@ namespace Accord.GraphQL
 
             if (!SettingExists(LAST_UPDATED_SETTING_NAME))
             {
-                DateTime value = new DateTime(2021, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-                CreateSetting(LAST_UPDATED_SETTING_NAME, value.ToString("yyyy-MM-ddTHH:mm:ss"));
+                DateTime current = DateTime.Now;
+                DateTime initValue = new DateTime(current.Year, current.Month, current.Day, 0, 0, 0, DateTimeKind.Utc);
+                CreateSetting(LAST_UPDATED_SETTING_NAME, initValue.ToString("yyyy-MM-ddTHH:mm:ss"));
             }
         }
         
