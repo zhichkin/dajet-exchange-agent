@@ -189,9 +189,15 @@ namespace Accord.GraphQL
 
             } while (total > 0);
 
-            SettingsProvider.SetSetting(LAST_UPDATED_SETTING_NAME, lastUpdated);
-
-            FileLogger.Log($"GraphQL: new timestamp = {lastUpdated:yyyy-MM-dd HH:mm:ss}");
+            if (lastUpdated != DateTime.MinValue)
+            {
+                SettingsProvider.SetSetting(LAST_UPDATED_SETTING_NAME, lastUpdated);
+                FileLogger.Log($"GraphQL: new timestamp = {lastUpdated:yyyy-MM-dd HH:mm:ss}");
+            }
+            else
+            {
+                FileLogger.Log($"GraphQL: timestamp has not been changed");
+            }
 
             FileLogger.Log($"GraphQL: loaded {counter} products.");
 
