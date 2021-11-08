@@ -6,7 +6,7 @@
     <UserSecretsId>dotnet-dajet-exchange-CA21F02E-595A-4FCB-BB7E-1D2E22DF3D76</UserSecretsId>
     <RootNamespace>DaJet.RabbitMQ.Producer</RootNamespace>
     <PackageId>DaJet.Exchange.Agent</PackageId>
-    <Version>3.0.0</Version>
+    <Version>3.1.0</Version>
     <Authors>Zhichkin</Authors>
     <Product>DaJet.Exchange.Agent</Product>
     <Description>DaJet Exchange Agent is a Windows service for integrating 1C: Enterprise 8 with RabbitMQ at the database level.
@@ -16,6 +16,7 @@ In other words, DaJet is a database adapter between 1C tables and RabbitMQ queue
     <PackageProjectUrl>https://github.com/zhichkin/dajet-exchange-agent</PackageProjectUrl>
     <RepositoryUrl>https://github.com/zhichkin/dajet-exchange-agent</RepositoryUrl>
     <AssemblyName>dajet-rabbitmq-producer</AssemblyName>
+    <PackageReleaseNotes>GTIN codes collection added to the Product class and GraphQL query.</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>
