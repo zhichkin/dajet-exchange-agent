@@ -35,8 +35,8 @@ namespace tests
         [TestMethod] public async Task TestProductSearch()
         {
             int pageNum = 1;
-            int perPage = 30;
-            DateTime dateUtc = new DateTime(2021, 10, 1);
+            int perPage = 10;
+            DateTime dateUtc = new DateTime(2021, 10, 15);
             ProductSearch result = await client.GetUpdatedProducts(dateUtc, pageNum, perPage);
 
             if (result == null)
@@ -59,6 +59,10 @@ namespace tests
                 Console.WriteLine($"{counter}. Product {product.id} ({product.code})");
                 Console.WriteLine($"{product.name} is MDLP = {product.isMdlp}");
                 Console.WriteLine($"Last updated: {product.updatedAt:yyyy-MM-dd HH:mm:ss}");
+                foreach (GtinCode gtin in product.gtinCodes)
+                {
+                    Console.WriteLine($"- {gtin.code}");
+                }
                 Console.WriteLine();
             }
         }
@@ -103,8 +107,8 @@ namespace tests
 
             int total = 0;
             int pageNum = 0;
-            int perPage = 10;
-            DateTime dateUtc = new DateTime(2021, 1, 1);
+            int perPage = 100;
+            DateTime dateUtc = new DateTime(2021, 10, 15);
             do
             {
                 pageNum++;

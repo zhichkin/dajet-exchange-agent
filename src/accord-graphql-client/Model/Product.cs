@@ -11,7 +11,7 @@ namespace Accord.GraphQL.Model
         private readonly string QUERY = $"query ProductSearch {{ productSearch (page:{PAGE_NUM} perPage:{PER_PAGE} "
             + $"filters: {{ updatedAt: {{ gt: \"{DATE_UTC}\" }} }}) "
             + $"{{ pageInfo {{ page perPage total }} "
-            + $"items {{ id code name isMdlp updatedAt }} }} }}";
+            + $"items {{ id code name isMdlp updatedAt gtinCodes {{ code }} }} }} }}";
         internal ProductSearchRequest(DateTime dateUtc, int pageNum, int perPage)
         {
             query = QUERY
@@ -42,6 +42,11 @@ namespace Accord.GraphQL.Model
         public string name { get; set; }
         public bool isMdlp { get; set; }
         public DateTime updatedAt { get; set; }
+        public List<GtinCode> gtinCodes { get; set; }
+    }
+    public sealed class GtinCode
+    {
+        public string code { get; set; }
     }
     public sealed class ProductSearch
     {
